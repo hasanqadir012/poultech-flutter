@@ -56,13 +56,14 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
         elevation: 0,
         centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          children: [
-            // Image preview area
-            Expanded(
-              child: Container(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            children: [
+              // Image preview area
+              Container(
+                height: MediaQuery.of(context).size.height * 0.5,
                 width: double.infinity,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(24),
@@ -119,56 +120,56 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
                         ),
                 ),
               ),
-            ),
-            const SizedBox(height: 24),
-            
-            // Image source buttons
-            Row(
-              children: [
-                Expanded(
-                  child: _buildActionButton(
-                    icon: Icons.photo_library_outlined,
-                    label: 'Gallery',
-                    gradientColors: [const Color(0xFF3B82F6), const Color(0xFF2563EB)],
-                    onTap: () => _pickImage(ImageSource.gallery),
+              const SizedBox(height: 24),
+              
+              // Image source buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildActionButton(
+                      icon: Icons.photo_library_outlined,
+                      label: 'Gallery',
+                      gradientColors: [const Color(0xFF3B82F6), const Color(0xFF2563EB)],
+                      onTap: () => _pickImage(ImageSource.gallery),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildActionButton(
-                    icon: Icons.camera_alt_outlined,
-                    label: 'Camera',
-                    gradientColors: [const Color(0xFF06B6D4), const Color(0xFF0891B2)],
-                    onTap: () => _pickImage(ImageSource.camera),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildActionButton(
+                      icon: Icons.camera_alt_outlined,
+                      label: 'Camera',
+                      gradientColors: [const Color(0xFF06B6D4), const Color(0xFF0891B2)],
+                      onTap: () => _pickImage(ImageSource.camera),
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            
-            // Detection mode buttons
-            Row(
-              children: [
-                Expanded(
-                  child: _buildActionButton(
-                    icon: Icons.grid_on,
-                    label: 'Multi-Egg',
-                    gradientColors: [const Color(0xFF10B981), const Color(0xFF059669)],
-                    onTap: () => _processImage('multi'),
+                ],
+              ),
+              const SizedBox(height: 16),
+              
+              // Detection mode buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildActionButton(
+                      icon: Icons.grid_on,
+                      label: 'Multi-Egg',
+                      gradientColors: [const Color(0xFF10B981), const Color(0xFF059669)],
+                      onTap: () => _processImage('multi'),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildActionButton(
-                    icon: Icons.egg,
-                    label: 'Single-Egg',
-                    gradientColors: [const Color(0xFFA855F7), const Color(0xFF9333EA)],
-                    onTap: () => _processImage('single'),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildActionButton(
+                      icon: Icons.egg,
+                      label: 'Single-Egg',
+                      gradientColors: [const Color(0xFFA855F7), const Color(0xFF9333EA)],
+                      onTap: () => _processImage('single'),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
