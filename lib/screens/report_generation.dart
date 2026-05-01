@@ -1,10 +1,14 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:printing/printing.dart';
 
 import '../models/detection_models.dart';
 import '../services/llm_service.dart';
 import '../services/onnx_service.dart';
+import '../services/pdf_service.dart';
 
 class ReportGenerationScreen extends StatefulWidget {
   final File imageFile;
@@ -24,6 +28,8 @@ class ReportGenerationScreen extends StatefulWidget {
 class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
   String _reportText = "Generating professional report...";
   bool _isLoading = true;
+  bool _isPdfLoading = false;
+  Map<String, dynamic> _structuredStats = {};
 
   @override
   void initState() {
@@ -34,10 +40,6 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
   /// 🧹 Cleans markdown-like formatting coming from LLM
   String _sanitizeLLMOutput(String text) {
     return text
-        // Remove **bold**
-        .replaceAll(RegExp(r'\*\*(.*?)\*\*'), r'$1')
-        // Remove single *
-        .replaceAll('*', '')
         // Remove markdown headings ###
         .replaceAll(RegExp(r'#+\s?'), '')
         // Normalize extra newlines
@@ -71,6 +73,7 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
 
       setState(() {
         _reportText = cleanedReport;
+        _structuredStats = structuredData;
         _isLoading = false;
       });
     } catch (e) {
@@ -137,12 +140,20 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
                     : Padding(
                         padding: const EdgeInsets.all(16.0),
                         child: SingleChildScrollView(
-                          child: Text(
-                            _reportText,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              height: 1.4,
+                          child: MarkdownBody(
+                            data: _reportText,
+                            styleSheet: MarkdownStyleSheet(
+                              p: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                height: 1.4,
+                              ),
+                              strong: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                              listBullet: const TextStyle(color: Colors.white),
                             ),
                           ),
                         ),
@@ -150,61 +161,130 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
               ),
             ),
             const SizedBox(height: 14),
+            if (_isPdfLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF2563EB),
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Text('Generating PDF...', style: TextStyle(color: Colors.white70)),
+                  ],
+                ),
+              ),
             Row(
               children: [
+                // ── Save to device ─────────────────────────────────────────
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _isLoading
+                    onPressed: (_isLoading || _isPdfLoading)
                         ? null
-                        : () {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
-                              const SnackBar(
-                                  content: Text('Report Saved.')),
-                            );
+                        : () async {
+                            setState(() => _isPdfLoading = true);
+                            try {
+                              final bytes = await PdfService.generate(
+                                imageFile: widget.imageFile,
+                                reportText: _reportText,
+                                stats: _structuredStats,
+                                results: widget.results,
+                              );
+                              final dir = await getExternalStorageDirectory();
+                              final path = '${dir!.path}/poultech_report_${DateTime.now().millisecondsSinceEpoch}.pdf';
+                              await File(path).writeAsBytes(bytes);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('✅ Report saved to Downloads')),
+                                );
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error saving: $e')),
+                                );
+                              }
+                            } finally {
+                              if (mounted) setState(() => _isPdfLoading = false);
+                            }
                           },
                     icon: const Icon(Icons.save_alt),
                     label: const Text('Save'),
-                    style: _primaryButtonStyle(
-                        const Color(0xFF2563EB)),
+                    style: _primaryButtonStyle(const Color(0xFF2563EB)),
                   ),
                 ),
                 const SizedBox(width: 10),
+                // ── Share via share sheet (WhatsApp, Gmail, etc.) ──────────
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _isLoading
+                    onPressed: (_isLoading || _isPdfLoading)
                         ? null
-                        : () {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
-                              const SnackBar(
-                                  content: Text('Sharing Report...')),
-                            );
+                        : () async {
+                            setState(() => _isPdfLoading = true);
+                            try {
+                              final bytes = await PdfService.generate(
+                                imageFile: widget.imageFile,
+                                reportText: _reportText,
+                                stats: _structuredStats,
+                                results: widget.results,
+                              );
+                              await Printing.sharePdf(
+                                bytes: bytes,
+                                filename: 'poultech_fertility_report.pdf',
+                              );
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error sharing: $e')),
+                                );
+                              }
+                            } finally {
+                              if (mounted) setState(() => _isPdfLoading = false);
+                            }
                           },
                     icon: const Icon(Icons.share_outlined),
                     label: const Text('Share'),
-                    style: _primaryButtonStyle(
-                        const Color(0xFF10B981)),
+                    style: _primaryButtonStyle(const Color(0xFF10B981)),
                   ),
                 ),
                 const SizedBox(width: 10),
+                // ── Open in PDF viewer ─────────────────────────────────────
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _isLoading
+                    onPressed: (_isLoading || _isPdfLoading)
                         ? null
-                        : () {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
-                              const SnackBar(
-                                  content:
-                                      Text('Exporting to PDF...')),
-                            );
+                        : () async {
+                            setState(() => _isPdfLoading = true);
+                            try {
+                              final bytes = await PdfService.generate(
+                                imageFile: widget.imageFile,
+                                reportText: _reportText,
+                                stats: _structuredStats,
+                                results: widget.results,
+                              );
+                              await Printing.layoutPdf(
+                                onLayout: (_) async => bytes,
+                                name: 'poultech_fertility_report',
+                              );
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error: $e')),
+                                );
+                              }
+                            } finally {
+                              if (mounted) setState(() => _isPdfLoading = false);
+                            }
                           },
-                    icon: const Icon(
-                        Icons.picture_as_pdf_outlined),
+                    icon: const Icon(Icons.picture_as_pdf_outlined),
                     label: const Text('Export PDF'),
-                    style: _primaryButtonStyle(
-                        const Color(0xFFF59E0B)),
+                    style: _primaryButtonStyle(const Color(0xFFF59E0B)),
                   ),
                 ),
               ],

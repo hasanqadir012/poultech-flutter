@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../services/llm_service.dart';
 
 class KnowledgeAssistantScreen extends StatefulWidget {
@@ -322,12 +323,20 @@ class _KnowledgeAssistantScreenState extends State<KnowledgeAssistantScreen> {
                         color: Colors.white.withOpacity(0.1),
                       ),
               ),
-              child: Text(
-                message.text,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  height: 1.4,
+              child: MarkdownBody(
+                data: message.text,
+                styleSheet: MarkdownStyleSheet(
+                  p: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    height: 1.4,
+                  ),
+                  strong: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                  listBullet: const TextStyle(color: Colors.white),
                 ),
               ),
             ),
