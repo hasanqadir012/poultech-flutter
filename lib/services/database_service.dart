@@ -23,7 +23,9 @@ class SaveResult {
 class DatabaseService {
   // Replace with your Railway deployment URL after backend is deployed.
   // Example: 'https://poultech-api-production.up.railway.app'
-  static const String _baseUrl = 'https://YOUR_RAILWAY_URL_HERE';
+  // Local dev: use your machine's LAN IP so the physical device can reach it.
+  // After Railway deploy, replace with your Railway URL (https://...).
+  static const String _baseUrl = 'http://192.168.0.44:3000';
 
   Future<String?> _getAuthToken() async {
     try {
@@ -164,6 +166,32 @@ class DatabaseService {
     } catch (e) {
       debugPrint('[DB] appendChatMessage error: $e');
       return false;
+    }
+  }
+
+  Future<List<ChatSessionModel>> getChatSessions({int limit = 30}) async {
+    debugPrint('[DB] getChatSessions — limit: $limit');
+    try {
+      final headers = await _headers();
+      final response = await http
+          .get(Uri.parse('$_baseUrl/chat/sessions?limit=$limit'), headers: headers)
+          .timeout(const Duration(seconds: 15));
+
+      debugPrint('[DB] GET /chat/sessions → status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
+        final sessions = data
+            .map((json) => ChatSessionModel.fromJson(json as Map<String, dynamic>))
+            .where((s) => s.messages.isNotEmpty)
+            .toList();
+        debugPrint('[DB] getChatSessions — ${sessions.length} non-empty sessions');
+        return sessions;
+      }
+      return [];
+    } catch (e) {
+      debugPrint('[DB] getChatSessions error: $e');
+      return [];
     }
   }
 

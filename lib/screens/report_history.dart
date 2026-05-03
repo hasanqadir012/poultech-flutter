@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/report_model.dart';
 import '../services/database_service.dart';
+import 'report_viewer.dart';
 
 class ReportHistoryScreen extends StatefulWidget {
   const ReportHistoryScreen({super.key});
@@ -173,6 +174,12 @@ class _ReportHistoryScreenState extends State<ReportHistoryScreen> {
           return _ReportCard(
             report: _reports[index],
             onDelete: () => _confirmDelete(_reports[index]),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ReportViewerScreen(report: _reports[index]),
+              ),
+            ),
           );
         },
       ),
@@ -183,8 +190,16 @@ class _ReportHistoryScreenState extends State<ReportHistoryScreen> {
 class _ReportCard extends StatelessWidget {
   final ReportModel report;
   final VoidCallback onDelete;
+  final VoidCallback onTap;
 
-  const _ReportCard({required this.report, required this.onDelete});
+  const _ReportCard({required this.report, required this.onDelete, required this.onTap});
+
+  String _plainPreview(String text) {
+    return text
+        .replaceAll(RegExp(r'\*\*|##\s?|#\s?|\*'), '')
+        .replaceAll(RegExp(r'\n{2,}'), ' ')
+        .trim();
+  }
 
   Color get _statusColor {
     switch (report.status) {
@@ -199,8 +214,10 @@ class _ReportCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -298,9 +315,10 @@ class _ReportCard extends StatelessWidget {
             const Divider(color: Colors.white12, height: 1),
             const SizedBox(height: 12),
             Text(
-              report.reportText.length > 140
-                  ? '${report.reportText.substring(0, 140)}…'
-                  : report.reportText,
+              () {
+                final plain = _plainPreview(report.reportText);
+                return plain.length > 140 ? '${plain.substring(0, 140)}…' : plain;
+              }(),
               style: TextStyle(
                 color: Colors.white.withOpacity(0.65),
                 fontSize: 13,
@@ -308,8 +326,21 @@ class _ReportCard extends StatelessWidget {
               ),
             ),
           ],
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text(
+                'Tap to view full report →',
+                style: TextStyle(
+                  color: const Color(0xFF3B82F6).withOpacity(0.8),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
-    );
+    ));
   }
 }

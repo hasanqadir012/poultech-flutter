@@ -334,8 +334,8 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
                               if (mounted) setState(() => _isPdfLoading = false);
                             }
                           },
-                    icon: const Icon(Icons.picture_as_pdf_outlined),
-                    label: const Text('Export PDF'),
+                    icon: const Icon(Icons.print_outlined),
+                    label: const Text('Print PDF'),
                     style: _primaryButtonStyle(const Color(0xFFF59E0B)),
                   ),
                 ),

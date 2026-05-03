@@ -91,7 +91,7 @@ class HomeDashboard extends StatelessWidget {
   }
 
   Widget _buildHeader(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
+    final auth = context.watch<AppAuthProvider>();
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),

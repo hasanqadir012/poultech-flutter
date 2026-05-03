@@ -69,7 +69,7 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() => _submitted = true);
     if (!_formKey.currentState!.validate()) return;
 
-    final auth = context.read<AuthProvider>();
+    final auth = context.read<AppAuthProvider>();
     auth.clearError();
 
     final success = await auth.signUp(
@@ -93,7 +93,7 @@ class _SignupScreenState extends State<SignupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
+    final auth = context.watch<AppAuthProvider>();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),

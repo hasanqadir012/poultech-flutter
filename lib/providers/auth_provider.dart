@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
 
-class AuthProvider extends ChangeNotifier {
+class AppAuthProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
 
   User? _user;
@@ -22,7 +22,7 @@ class AuthProvider extends ChangeNotifier {
     return _user?.email?.split('@').first ?? 'Farmer';
   }
 
-  AuthProvider() {
+  AppAuthProvider() {
     _authService.authStateChanges.listen((user) {
       _user = user;
       notifyListeners();
