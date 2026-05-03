@@ -1,11 +1,15 @@
 import 'dart:io';
 
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/detection_models.dart';
+import '../models/report_model.dart';
+import '../services/database_service.dart';
 import '../services/llm_service.dart';
 import '../services/onnx_service.dart';
 import '../services/pdf_service.dart';
@@ -29,7 +33,10 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
   String _reportText = "Generating professional report...";
   bool _isLoading = true;
   bool _isPdfLoading = false;
+  bool _isSaving = false;
+  bool _isSaved = false;
   Map<String, dynamic> _structuredStats = {};
+  final DatabaseService _databaseService = DatabaseService();
 
   @override
   void initState() {
@@ -182,41 +189,86 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
               ),
             Row(
               children: [
-                // ── Save to device ─────────────────────────────────────────
+                // ── Save to account (MongoDB) ──────────────────────────────
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: (_isLoading || _isPdfLoading)
+                    onPressed: (_isLoading || _isSaving || _isSaved)
                         ? null
                         : () async {
-                            setState(() => _isPdfLoading = true);
-                            try {
-                              final bytes = await PdfService.generate(
-                                imageFile: widget.imageFile,
-                                reportText: _reportText,
-                                stats: _structuredStats,
-                                results: widget.results,
+                            setState(() => _isSaving = true);
+
+                            final uid = FirebaseAuth.instance.currentUser?.uid;
+                            if (uid == null) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Please sign in to save reports.'),
+                                    backgroundColor: Color(0xFFEF4444),
+                                  ),
+                                );
+                                setState(() => _isSaving = false);
+                              }
+                              return;
+                            }
+
+                            final total = (_structuredStats['total'] as int?) ?? widget.results.length;
+                            final fertile = (_structuredStats['fertile'] as int?) ?? widget.results.where((r) => r.isFertile).length;
+                            final infertile = total - fertile;
+                            final rate = total > 0 ? fertile / total : 0.0;
+
+                            debugPrint('[REPORT] Saving report — uid: $uid, '
+                                'total: $total, fertile: $fertile, rate: $rate');
+
+                            final report = ReportModel(
+                              userId: uid,
+                              createdAt: DateTime.now(),
+                              totalEggs: total,
+                              fertileEggs: fertile,
+                              infertileEggs: infertile,
+                              fertilityRate: rate,
+                              reportText: _reportText,
+                              imagePath: widget.imageFile.path,
+                            );
+
+                            final result = await _databaseService.saveReport(report);
+
+                            if (mounted) {
+                              setState(() {
+                                _isSaving = false;
+                                _isSaved = result.isSuccess;
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    result.isSuccess
+                                        ? '✓ Report saved to your account'
+                                        : result.errorMessage ?? 'Save failed. Please try again.',
+                                  ),
+                                  backgroundColor: result.isSuccess
+                                      ? const Color(0xFF10B981)
+                                      : const Color(0xFFEF4444),
+                                  behavior: SnackBarBehavior.floating,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
                               );
-                              final dir = await getExternalStorageDirectory();
-                              final path = '${dir!.path}/poultech_report_${DateTime.now().millisecondsSinceEpoch}.pdf';
-                              await File(path).writeAsBytes(bytes);
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('✅ Report saved to Downloads')),
-                                );
-                              }
-                            } catch (e) {
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Error saving: $e')),
-                                );
-                              }
-                            } finally {
-                              if (mounted) setState(() => _isPdfLoading = false);
                             }
                           },
-                    icon: const Icon(Icons.save_alt),
-                    label: const Text('Save'),
-                    style: _primaryButtonStyle(const Color(0xFF2563EB)),
+                    icon: _isSaving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Icon(_isSaved ? Icons.check_circle_outline : Icons.cloud_upload_outlined),
+                    label: Text(_isSaved ? 'Saved ✓' : 'Save'),
+                    style: _primaryButtonStyle(
+                      _isSaved ? const Color(0xFF10B981) : const Color(0xFF2563EB),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
