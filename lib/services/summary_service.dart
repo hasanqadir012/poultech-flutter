@@ -5,10 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../app_config.dart';
 import '../models/summary_model.dart';
 
 class SummaryService {
-  static const String _baseUrl = 'http://192.168.0.44:3000';
+  static const String _baseUrl = AppConfig.backendBaseUrl;
 
   Future<Map<String, String>> _headers() async {
     try {
