@@ -1,10 +1,18 @@
 import 'dart:io';
 
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:printing/printing.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/detection_models.dart';
+import '../models/report_model.dart';
+import '../services/database_service.dart';
 import '../services/llm_service.dart';
 import '../services/onnx_service.dart';
+import '../services/pdf_service.dart';
 
 class ReportGenerationScreen extends StatefulWidget {
   final File imageFile;
@@ -24,6 +32,11 @@ class ReportGenerationScreen extends StatefulWidget {
 class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
   String _reportText = "Generating professional report...";
   bool _isLoading = true;
+  bool _isPdfLoading = false;
+  bool _isSaving = false;
+  bool _isSaved = false;
+  Map<String, dynamic> _structuredStats = {};
+  final DatabaseService _databaseService = DatabaseService();
 
   @override
   void initState() {
@@ -34,10 +47,6 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
   /// 🧹 Cleans markdown-like formatting coming from LLM
   String _sanitizeLLMOutput(String text) {
     return text
-        // Remove **bold**
-        .replaceAll(RegExp(r'\*\*(.*?)\*\*'), r'$1')
-        // Remove single *
-        .replaceAll('*', '')
         // Remove markdown headings ###
         .replaceAll(RegExp(r'#+\s?'), '')
         // Normalize extra newlines
@@ -71,6 +80,7 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
 
       setState(() {
         _reportText = cleanedReport;
+        _structuredStats = structuredData;
         _isLoading = false;
       });
     } catch (e) {
@@ -88,6 +98,7 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        foregroundColor: Colors.white,
         title: const Text('Fertility Report'),
       ),
       body: Padding(
@@ -137,12 +148,20 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
                     : Padding(
                         padding: const EdgeInsets.all(16.0),
                         child: SingleChildScrollView(
-                          child: Text(
-                            _reportText,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              height: 1.4,
+                          child: MarkdownBody(
+                            data: _reportText,
+                            styleSheet: MarkdownStyleSheet(
+                              p: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                height: 1.4,
+                              ),
+                              strong: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                              listBullet: const TextStyle(color: Colors.white),
                             ),
                           ),
                         ),
@@ -150,61 +169,175 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
               ),
             ),
             const SizedBox(height: 14),
+            if (_isPdfLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFF2563EB),
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Text('Generating PDF...', style: TextStyle(color: Colors.white70)),
+                  ],
+                ),
+              ),
             Row(
               children: [
+                // ── Save to account (MongoDB) ──────────────────────────────
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _isLoading
+                    onPressed: (_isLoading || _isSaving || _isSaved)
                         ? null
-                        : () {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
-                              const SnackBar(
-                                  content: Text('Report Saved.')),
+                        : () async {
+                            setState(() => _isSaving = true);
+
+                            final uid = FirebaseAuth.instance.currentUser?.uid;
+                            if (uid == null) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Please sign in to save reports.'),
+                                    backgroundColor: Color(0xFFEF4444),
+                                  ),
+                                );
+                                setState(() => _isSaving = false);
+                              }
+                              return;
+                            }
+
+                            final total = (_structuredStats['total'] as int?) ?? widget.results.length;
+                            final fertile = (_structuredStats['fertile'] as int?) ?? widget.results.where((r) => r.isFertile).length;
+                            final infertile = total - fertile;
+                            final rate = total > 0 ? fertile / total : 0.0;
+
+                            debugPrint('[REPORT] Saving report — uid: $uid, '
+                                'total: $total, fertile: $fertile, rate: $rate');
+
+                            final report = ReportModel(
+                              userId: uid,
+                              createdAt: DateTime.now(),
+                              totalEggs: total,
+                              fertileEggs: fertile,
+                              infertileEggs: infertile,
+                              fertilityRate: rate,
+                              reportText: _reportText,
+                              imagePath: widget.imageFile.path,
                             );
+
+                            final result = await _databaseService.saveReport(report);
+
+                            if (mounted) {
+                              setState(() {
+                                _isSaving = false;
+                                _isSaved = result.isSuccess;
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    result.isSuccess
+                                        ? '✓ Report saved to your account'
+                                        : result.errorMessage ?? 'Save failed. Please try again.',
+                                  ),
+                                  backgroundColor: result.isSuccess
+                                      ? const Color(0xFF10B981)
+                                      : const Color(0xFFEF4444),
+                                  behavior: SnackBarBehavior.floating,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                              );
+                            }
                           },
-                    icon: const Icon(Icons.save_alt),
-                    label: const Text('Save'),
+                    icon: _isSaving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Icon(_isSaved ? Icons.check_circle_outline : Icons.cloud_upload_outlined),
+                    label: Text(_isSaved ? 'Saved ✓' : 'Save'),
                     style: _primaryButtonStyle(
-                        const Color(0xFF2563EB)),
+                      _isSaved ? const Color(0xFF10B981) : const Color(0xFF2563EB),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
+                // ── Share via share sheet (WhatsApp, Gmail, etc.) ──────────
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _isLoading
+                    onPressed: (_isLoading || _isPdfLoading)
                         ? null
-                        : () {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
-                              const SnackBar(
-                                  content: Text('Sharing Report...')),
-                            );
+                        : () async {
+                            setState(() => _isPdfLoading = true);
+                            try {
+                              final bytes = await PdfService.generate(
+                                imageFile: widget.imageFile,
+                                reportText: _reportText,
+                                stats: _structuredStats,
+                                results: widget.results,
+                              );
+                              await Printing.sharePdf(
+                                bytes: bytes,
+                                filename: 'poultech_fertility_report.pdf',
+                              );
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error sharing: $e')),
+                                );
+                              }
+                            } finally {
+                              if (mounted) setState(() => _isPdfLoading = false);
+                            }
                           },
                     icon: const Icon(Icons.share_outlined),
                     label: const Text('Share'),
-                    style: _primaryButtonStyle(
-                        const Color(0xFF10B981)),
+                    style: _primaryButtonStyle(const Color(0xFF10B981)),
                   ),
                 ),
                 const SizedBox(width: 10),
+                // ── Open in PDF viewer ─────────────────────────────────────
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _isLoading
+                    onPressed: (_isLoading || _isPdfLoading)
                         ? null
-                        : () {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
-                              const SnackBar(
-                                  content:
-                                      Text('Exporting to PDF...')),
-                            );
+                        : () async {
+                            setState(() => _isPdfLoading = true);
+                            try {
+                              final bytes = await PdfService.generate(
+                                imageFile: widget.imageFile,
+                                reportText: _reportText,
+                                stats: _structuredStats,
+                                results: widget.results,
+                              );
+                              await Printing.layoutPdf(
+                                onLayout: (_) async => bytes,
+                                name: 'poultech_fertility_report',
+                              );
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error: $e')),
+                                );
+                              }
+                            } finally {
+                              if (mounted) setState(() => _isPdfLoading = false);
+                            }
                           },
-                    icon: const Icon(
-                        Icons.picture_as_pdf_outlined),
-                    label: const Text('Export PDF'),
-                    style: _primaryButtonStyle(
-                        const Color(0xFFF59E0B)),
+                    icon: const Icon(Icons.print_outlined),
+                    label: const Text('Print PDF'),
+                    style: _primaryButtonStyle(const Color(0xFFF59E0B)),
                   ),
                 ),
               ],

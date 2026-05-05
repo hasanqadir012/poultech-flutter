@@ -11,17 +11,30 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+# Environment & secrets
+.env
+*.env
+lib/firebase_options.dart
+
+# Firebase
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+
+# Flutter
+.dart_tool/
+build/
+*.g.dart
 
 # IntelliJ related
 *.iml
 *.ipr
 *.iws
 .idea/
-
+*.md
 # The .vscode folder contains launch configuration and tasks you configure in
 # VS Code which you may wish to be included in version control, so this line
 # is commented out by default.
-#.vscode/
+.vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
@@ -46,3 +59,16 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Large model files (do not push, exceed limits or unnecessary)
+*.onnx
+
+# Test scripts and local scratch files
+*.py
+
+# Test images and temporary outputs
+/*.jpg
+/*.jpeg
+/appLogo.jpeg
+/*.png
+/assets

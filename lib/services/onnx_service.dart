@@ -1,40 +1,30 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:image/image.dart' as img;
 
 import '../models/detection_models.dart';
 
 /// ONNX inference service.
 /// - Input: 1x3x640x640 float32 RGB, 0-1 normalized, letterboxed.
-/// - Output: 1x6x8400 (YOLOv8 Raw), indices: 0-3 (box), 4 (fertile), 5 (infertile).
+/// - Output: 1x300x6 (YOLOv8 Post-NMS), indices: 0-3 (x1,y1,x2,y2), 4 (score), 5 (class_id).
 class ONNXService {
-  static const String _modelAssetPath = 'assets/best.onnx';
-  static const _channel = MethodChannel('poultech/onnx'); 
+  static const _channel = MethodChannel('poultech/onnx');
 
   // YOLOv8 Post-processing thresholds
   static const double _confThreshold = 0.30;
   static const double _iouThreshold = 0.45;
   static const int _maxDetections = 100;
 
-  static Uint8List? _modelBytes;
-  static File? _modelFile;
   static List<EggDetectionResult>? _lastDetections;
 
   /// Ensure model bytes are loaded.
   static Future<void> ensureModelLoaded() async {
-    if (_modelBytes != null && _modelFile != null) return;
-    final data = await rootBundle.load(_modelAssetPath);
-    _modelBytes = data.buffer.asUint8List();
-    final tmpDir = await Directory.systemTemp.createTemp('poultech_onnx');
-    final f = File('${tmpDir.path}/best.onnx'); 
-    await f.writeAsBytes(_modelBytes!, flush: true);
-    _modelFile = f;
-    debugPrint('ONNX model loaded (${_modelBytes!.lengthInBytes} bytes)');
+    // Model is loaded natively in MainActivity.kt
+    // Removed Dart-side loading to prevent Out of Memory (OOM) crashes on Android
+    return;
   }
 
   /// Run detection and return bounding boxes.
@@ -59,7 +49,9 @@ class ONNXService {
 
   /// Generates a summary map of the detections for the LLM Report service.
   /// Call this with the results from runClassification.
-  static Map<String, dynamic> getSummaryStats(List<EggDetectionResult> results) {
+  static Map<String, dynamic> getSummaryStats(
+    List<EggDetectionResult> results,
+  ) {
     int fertile = 0;
     int infertile = 0;
 
@@ -79,103 +71,59 @@ class ONNXService {
     };
   }
 
-  static Future<List<EggDetectionResult>> _runFullInference(File imageFile) async {
+  static Future<List<EggDetectionResult>> _runFullInference(
+    File imageFile,
+  ) async {
     await ensureModelLoaded();
 
-    final original = img.decodeImage(await imageFile.readAsBytes());
-    if (original == null) {
-      throw Exception('Unable to decode image');
-    }
-    
-    final letterbox = _letterbox(original, 640, 640);
-    final Float32List input = _toBlob(letterbox.image);
-
     final Float32List output;
+    int imgWidth;
+    int imgHeight;
+    double ratio;
+    double padW;
+    double padH;
+
     try {
       final result = await _channel.invokeMethod('runModel', {
-        'input': input,
+        'imagePath': imageFile.absolute.path,
       });
-      
+
       if (result == null) {
         throw Exception('ONNX runtime returned null');
       }
 
-      // Handle the result whether it comes back as Float32List or List<dynamic>
-      if (result is Float32List) {
-        output = result;
+      final Map<dynamic, dynamic> resultMap = result as Map<dynamic, dynamic>;
+      
+      final rawOutput = resultMap['output'];
+      if (rawOutput is Float32List) {
+        output = rawOutput;
       } else {
-        output = Float32List.fromList(List<double>.from(result));
+        output = Float32List.fromList((rawOutput as List<dynamic>).cast<double>());
       }
+      
+      imgWidth = (resultMap['imgWidth'] as num).toInt();
+      imgHeight = (resultMap['imgHeight'] as num).toInt();
+      ratio = (resultMap['ratio'] as num).toDouble();
+      padW = (resultMap['padW'] as num).toDouble();
+      padH = (resultMap['padH'] as num).toDouble();
+      
     } on MissingPluginException {
       throw Exception('MethodChannel "poultech/onnx" not implemented.');
     }
 
-    // Expected Raw YOLOv8 Output: [1, 6, 8400] = 50400 values
-    const int expectedSize = 1 * 6 * 8400;
+    const int expectedSize = 1 * 300 * 6;
     if (output.length != expectedSize) {
       debugPrint('Warning: Unexpected output length: ${output.length}. Expected $expectedSize');
     }
 
     return _postprocess(
       output: output,
-      imgWidth: original.width,
-      imgHeight: original.height,
-      ratio: letterbox.ratio,
-      padW: letterbox.padW,
-      padH: letterbox.padH,
+      imgWidth: imgWidth,
+      imgHeight: imgHeight,
+      ratio: ratio,
+      padW: padW,
+      padH: padH,
     );
-  }
-
-  // --- Preprocess ---
-
-  static _LetterboxResult _letterbox(img.Image src, int newW, int newH) {
-    final double r = math.min(newW / src.width, newH / src.height);
-    final int resizedW = (src.width * r).round();
-    final int resizedH = (src.height * r).round();
-
-    final int padLeft = (newW - resizedW) ~/ 2;
-    final int padTop = (newH - resizedH) ~/ 2;
-
-    final resized = img.copyResize(
-      src,
-      width: resizedW,
-      height: resizedH,
-      interpolation: img.Interpolation.average,
-    );
-
-    final canvas = img.Image(width: newW, height: newH, numChannels: 3);
-    img.fill(canvas, color: img.ColorRgb8(114, 114, 114));
-
-    img.compositeImage(
-      canvas,
-      resized,
-      dstX: padLeft,
-      dstY: padTop,
-    );
-
-    return _LetterboxResult(
-      image: canvas,
-      ratio: r,
-      padW: padLeft.toDouble(),
-      padH: padTop.toDouble(),
-    );
-  }
-
-  static Float32List _toBlob(img.Image image) {
-    // Convert to CHW float32 normalized 0-1
-    final data = Float32List(3 * 640 * 640);
-    for (int y = 0; y < 640; y++) {
-      for (int x = 0; x < 640; x++) {
-        final pixel = image.getPixel(x, y);
-        // R channel
-        data[0 * 640 * 640 + y * 640 + x] = pixel.r / 255.0;
-        // G channel
-        data[1 * 640 * 640 + y * 640 + x] = pixel.g / 255.0;
-        // B channel
-        data[2 * 640 * 640 + y * 640 + x] = pixel.b / 255.0;
-      }
-    }
-    return data;
   }
 
   // --- Postprocess ---
@@ -188,66 +136,57 @@ class ONNXService {
     required double padW,
     required double padH,
   }) {
-    const int numAnchors = 8400;
-    final List<_DetectionCandidate> candidates = [];
+    const int maxDetections = 300;
+    final List<EggDetectionResult> results = [];
 
-    // YOLOv8 Raw Output is [1, 6, 8400]
-    // Indices: 0:cx, 1:cy, 2:w, 3:h, 4:score_class0, 5:score_class1
-    for (int i = 0; i < numAnchors; i++) {
-      final double score0 = output[4 * numAnchors + i];
-      final double score1 = output[5 * numAnchors + i];
-      
-      final double score = math.max(score0, score1);
+    // YOLOv8 Post-NMS Output is [1, 300, 6]
+    // Each detection: [x1, y1, x2, y2, score, class_id]
+    for (int i = 0; i < maxDetections; i++) {
+      final int baseIdx = i * 6;
+
+      // Skip padding (detections with all zeros)
+      final double x1Raw = output[baseIdx + 0];
+      final double y1Raw = output[baseIdx + 1];
+      final double x2Raw = output[baseIdx + 2];
+      final double y2Raw = output[baseIdx + 3];
+      final double score = output[baseIdx + 4];
+      final double classIdFloat = output[baseIdx + 5];
+
+      // Skip empty detections (padding)
+      if (x1Raw == 0 && y1Raw == 0 && x2Raw == 0 && y2Raw == 0 && score == 0) {
+        continue;
+      }
+
+      // Apply confidence threshold
       if (score < _confThreshold) continue;
 
-      final int classId = score0 > score1 ? 0 : 1;
+      final int classId = classIdFloat.round();
 
-      final double cx = output[0 * numAnchors + i];
-      final double cy = output[1 * numAnchors + i];
-      final double w = output[2 * numAnchors + i];
-      final double h = output[3 * numAnchors + i];
+      // Remove padding/scaling from letterbox coordinates
+      double x1 = (x1Raw - padW) / ratio;
+      double y1 = (y1Raw - padH) / ratio;
+      double x2 = (x2Raw - padW) / ratio;
+      double y2 = (y2Raw - padH) / ratio;
 
-      // Convert center-xywh to x1,y1,x2,y2 and remove padding/scaling
-      double x1 = (cx - w / 2 - padW) / ratio;
-      double y1 = (cy - h / 2 - padH) / ratio;
-      double x2 = (cx + w / 2 - padW) / ratio;
-      double y2 = (cy + h / 2 - padH) / ratio;
+      // Convert to x, y, width, height format and clamp to image bounds
+      final double width = (x2 - x1).clamp(0, imgWidth.toDouble());
+      final double height = (y2 - y1).clamp(0, imgHeight.toDouble());
 
-      candidates.add(_DetectionCandidate(
-        score: score,
-        classId: classId,
-        box: BoundingBox(
-          x1.clamp(0, imgWidth.toDouble()),
-          y1.clamp(0, imgHeight.toDouble()),
-          (x2 - x1).clamp(0, imgWidth.toDouble()),
-          (y2 - y1).clamp(0, imgHeight.toDouble()),
+      results.add(
+        EggDetectionResult(
+          BoundingBox(
+            x1.clamp(0, imgWidth.toDouble()),
+            y1.clamp(0, imgHeight.toDouble()),
+            width,
+            height,
+          ),
+          classId == 0, // fertile if class 0
+          score,
         ),
-      ));
-    }
+      );
 
-    // Sort by score for NMS
-    candidates.sort((a, b) => b.score.compareTo(a.score));
-
-    final List<EggDetectionResult> results = [];
-    final List<bool> suppressed = List.filled(candidates.length, false);
-
-    for (int i = 0; i < candidates.length; i++) {
-      if (suppressed[i]) continue;
-
-      final best = candidates[i];
-      results.add(EggDetectionResult(
-        best.box,
-        best.classId == 0, // fertile if class 0
-        best.score,
-      ));
-
+      // Limit to max detections
       if (results.length >= _maxDetections) break;
-
-      for (int j = i + 1; j < candidates.length; j++) {
-        if (!suppressed[j] && _calculateIOU(best.box, candidates[j].box) > _iouThreshold) {
-          suppressed[j] = true;
-        }
-      }
     }
 
     return results;
@@ -275,13 +214,10 @@ class _DetectionCandidate {
   final double score;
   final int classId;
   final BoundingBox box;
-  _DetectionCandidate({required this.score, required this.classId, required this.box});
+  _DetectionCandidate({
+    required this.score,
+    required this.classId,
+    required this.box,
+  });
 }
 
-class _LetterboxResult {
-  final img.Image image;
-  final double ratio;
-  final double padW;
-  final double padH;
-  _LetterboxResult({required this.image, required this.ratio, required this.padW, required this.padH});
-}
