@@ -54,6 +54,7 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        foregroundColor: Colors.white,
         centerTitle: true,
       ),
       body: SafeArea(

@@ -1,22 +1,96 @@
 import 'package:flutter/material.dart';
+import '../models/report_model.dart';
+import '../services/database_service.dart';
 import 'report_viewer.dart';
 
-class SavedReport {
-  final String id;
-  final String summary;
-  final String fullContent;
-  final String imageThumbnailPath;
+class ReportHistoryScreen extends StatefulWidget {
+  const ReportHistoryScreen({super.key});
 
-  SavedReport({required this.id, required this.summary, required this.fullContent, required this.imageThumbnailPath});
+  @override
+  State<ReportHistoryScreen> createState() => _ReportHistoryScreenState();
 }
 
-List<SavedReport> mockReports = [
-  SavedReport(id: '1', summary: 'High fertility (95%) on 2025-12-09', fullContent: 'The detailed report text...', imageThumbnailPath: 'assets/thumbnail1.png'),
-  SavedReport(id: '2', summary: 'Low fertility (40%) on 2025-12-08', fullContent: 'Another detailed report text...', imageThumbnailPath: 'assets/thumbnail2.png'),
-];
+class _ReportHistoryScreenState extends State<ReportHistoryScreen> {
+  final DatabaseService _db = DatabaseService();
+  List<ReportModel> _reports = [];
+  bool _isLoading = true;
+  String? _errorMessage;
 
-class ReportHistoryScreen extends StatelessWidget {
-  const ReportHistoryScreen({super.key});
+  @override
+  void initState() {
+    super.initState();
+    _fetchReports();
+  }
+
+  Future<void> _fetchReports() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    final reports = await _db.getReports();
+    if (mounted) {
+      setState(() {
+        _reports = reports;
+        _isLoading = false;
+        if (reports.isEmpty) _errorMessage = null;
+      });
+    }
+  }
+
+  Future<void> _confirmDelete(ReportModel report) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Delete Report?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'This will permanently delete the report for ${report.totalEggs} eggs '
+          '(${report.fertilityPercent} fertility) from ${report.formattedDate}.',
+          style: const TextStyle(color: Color(0xFF94A3B8)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444))),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final success = await _db.deleteReport(report.id!);
+    if (mounted) {
+      if (success) {
+        setState(() => _reports.removeWhere((r) => r.id == report.id));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Report deleted.'),
+            backgroundColor: const Color(0xFFEF4444),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Failed to delete. Check your connection.'),
+            backgroundColor: const Color(0xFFEF4444),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,47 +105,119 @@ class ReportHistoryScreen extends StatelessWidget {
         ),
         centerTitle: true,
       ),
-      body: mockReports.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.history_outlined,
-                    size: 64,
-                    color: Colors.white.withOpacity(0.3),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No reports yet',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.5),
-                      fontSize: 18,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(20),
-              itemCount: mockReports.length,
-              itemBuilder: (context, index) {
-                final report = mockReports[index];
-                return _HistoryCard(report: report);
-              },
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF3B82F6)),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.wifi_off_outlined, size: 56, color: Colors.white.withOpacity(0.3)),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 15),
             ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _fetchReports,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF3B82F6),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('Try Again', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_reports.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.history_outlined, size: 64, color: Colors.white.withOpacity(0.3)),
+            const SizedBox(height: 16),
+            Text(
+              'No reports yet',
+              style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 18),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Run a detection and save your first report.',
+              style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _fetchReports,
+      color: const Color(0xFF3B82F6),
+      backgroundColor: const Color(0xFF1E293B),
+      child: ListView.builder(
+        padding: const EdgeInsets.all(20),
+        itemCount: _reports.length,
+        itemBuilder: (context, index) {
+          return _ReportCard(
+            report: _reports[index],
+            onDelete: () => _confirmDelete(_reports[index]),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ReportViewerScreen(report: _reports[index]),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
 
-class _HistoryCard extends StatelessWidget {
-  final SavedReport report;
-  const _HistoryCard({required this.report});
+class _ReportCard extends StatelessWidget {
+  final ReportModel report;
+  final VoidCallback onDelete;
+  final VoidCallback onTap;
+
+  const _ReportCard({required this.report, required this.onDelete, required this.onTap});
+
+  String _plainPreview(String text) {
+    return text
+        .replaceAll(RegExp(r'\*\*|##\s?|#\s?|\*'), '')
+        .replaceAll(RegExp(r'\n{2,}'), ' ')
+        .trim();
+  }
+
+  Color get _statusColor {
+    switch (report.status) {
+      case FertilityStatus.good:
+        return const Color(0xFF10B981);
+      case FertilityStatus.moderate:
+        return const Color(0xFFF59E0B);
+      case FertilityStatus.poor:
+        return const Color(0xFFEF4444);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -83,9 +229,7 @@ class _HistoryCard extends StatelessWidget {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.2),
-        ),
+        border: Border.all(color: Colors.white.withOpacity(0.2)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.2),
@@ -98,135 +242,137 @@ class _HistoryCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Fertility rate circle
               Container(
-                padding: const EdgeInsets.all(12),
+                width: 56,
+                height: 56,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
-                  ),
-                  borderRadius: BorderRadius.circular(12),
+                  color: _statusColor.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _statusColor.withOpacity(0.4)),
                 ),
-                child: const Icon(
-                  Icons.article_outlined,
-                  color: Colors.white,
-                  size: 24,
+                child: Center(
+                  child: Text(
+                    report.fertilityPercent,
+                    style: TextStyle(
+                      color: _statusColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 14),
+              // Details
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Report #${report.id}',
+                      report.batchLabel ?? '${report.totalEggs} eggs analysed',
                       style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
                         color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      report.summary,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 14,
-                      ),
+                      '${report.fertileEggs} fertile · ${report.infertileEggs} infertile',
+                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                     ),
+                    const SizedBox(height: 2),
+                    Text(
+                      report.formattedDate,
+                      style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                    ),
+                    if (report.batchLabel != null) ...[
+                      const SizedBox(height: 5),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF3B82F6).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(5),
+                          border: Border.all(
+                            color: const Color(0xFF3B82F6)
+                                .withOpacity(0.25),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.label_outline,
+                                size: 10, color: Color(0xFF3B82F6)),
+                            const SizedBox(width: 4),
+                            Text(
+                              report.batchLabel!,
+                              style: const TextStyle(
+                                color: Color(0xFF3B82F6),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => ReportViewerScreen(report: report),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
-                      ),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        'Open Report',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
+              // Delete button
               GestureDetector(
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Exporting Report #${report.id}'),
-                      backgroundColor: const Color(0xFF10B981),
-                    ),
-                  );
-                },
+                onTap: onDelete,
                 child: Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.2),
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.download_outlined,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Deleted Report #${report.id}'),
-                      backgroundColor: const Color(0xFFEF4444),
-                    ),
-                  );
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.2),
-                    ),
+                    color: Colors.white.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white.withOpacity(0.15)),
                   ),
                   child: const Icon(
                     Icons.delete_outline,
                     color: Color(0xFFEF4444),
-                    size: 20,
+                    size: 18,
                   ),
+                ),
+              ),
+            ],
+          ),
+          if (report.reportText.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Divider(color: Colors.white12, height: 1),
+            const SizedBox(height: 12),
+            Text(
+              () {
+                final plain = _plainPreview(report.reportText);
+                return plain.length > 140 ? '${plain.substring(0, 140)}…' : plain;
+              }(),
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.65),
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text(
+                'Tap to view full report →',
+                style: TextStyle(
+                  color: const Color(0xFF3B82F6).withOpacity(0.8),
+                  fontSize: 12,
                 ),
               ),
             ],
           ),
         ],
       ),
-    );
+    ));
   }
 }

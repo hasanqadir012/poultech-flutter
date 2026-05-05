@@ -28,6 +28,7 @@ class DetectionResultsScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        foregroundColor: Colors.white,
         title: const Text('Detection Results'),
       ),
       body: Padding(
@@ -35,7 +36,6 @@ class DetectionResultsScreen extends StatelessWidget {
         child: Column(
           children: [
             Expanded(
-              flex: 3,
               child: FutureBuilder<Uint8List>(
                 future: imageFile.readAsBytes(),
                 builder: (context, snapshot) {
@@ -52,14 +52,11 @@ class DetectionResultsScreen extends StatelessWidget {
                       final containerWidth = constraints.maxWidth;
                       final containerHeight = constraints.maxHeight;
 
-                      // Calculate scale factor for BoxFit.cover
+                      // BoxFit.contain: scale down to fit entire image without cropping
                       final scaleX = containerWidth / origWidth;
                       final scaleY = containerHeight / origHeight;
-                      final scale = scaleX > scaleY
-                          ? scaleX
-                          : scaleY; // BoxFit.cover uses the larger scale
+                      final scale = scaleX < scaleY ? scaleX : scaleY;
 
-                      // Calculate offset for centering (BoxFit.cover centers the image)
                       final scaledWidth = origWidth * scale;
                       final scaledHeight = origHeight * scale;
                       final offsetX = (containerWidth - scaledWidth) / 2;
@@ -68,11 +65,12 @@ class DetectionResultsScreen extends StatelessWidget {
                       return Container(
                         width: double.infinity,
                         decoration: BoxDecoration(
+                          color: const Color(0xFF0A1020),
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(color: Colors.white12),
                           image: DecorationImage(
                             image: FileImage(imageFile),
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                           ),
                         ),
                         child: Stack(
@@ -191,104 +189,75 @@ class DetectionResultsScreen extends StatelessWidget {
                 },
               ),
             ),
-            const SizedBox(height: 16),
-            Expanded(
-              flex: 2,
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF111827),
-                  borderRadius: BorderRadius.circular(18),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.25),
-                      blurRadius: 14,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: const [
-                        Icon(Icons.analytics_outlined, color: Colors.white70),
-                        SizedBox(width: 8),
-                        Text(
-                          'Summary',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _statCard(
-                          'Total',
-                          _totalEggs.toString(),
-                          Colors.blueAccent,
-                        ),
-                        _statCard(
-                          'Fertile',
-                          _fertileEggs.toString(),
-                          Colors.greenAccent,
-                        ),
-                        _statCard(
-                          'Infertile',
-                          _infertileEggs.toString(),
-                          Colors.redAccent,
-                        ),
-                      ],
-                    ),
-                    const Spacer(),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => ReportGenerationScreen(
-                                results: results,
-                                imageFile: imageFile,
-                              ),
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.description_outlined),
-                        label: const Text('Generate Professional Report'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2563EB),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF111827),
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.25),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: const [
+                      Icon(Icons.analytics_outlined, color: Colors.white70),
+                      SizedBox(width: 8),
+                      Text(
+                        'Summary',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextButton.icon(
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _statCard('Total', _totalEggs.toString(), Colors.blueAccent),
+                      _statCard('Fertile', _fertileEggs.toString(), Colors.greenAccent),
+                      _statCard('Infertile', _infertileEggs.toString(), Colors.redAccent),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
                       onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Results saved locally.'),
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => ReportGenerationScreen(
+                              results: results,
+                              imageFile: imageFile,
+                            ),
                           ),
                         );
                       },
-                      icon: const Icon(Icons.save_alt, color: Colors.white70),
-                      label: const Text(
-                        'Save Results',
-                        style: TextStyle(color: Colors.white70),
+                      icon: const Icon(Icons.description_outlined),
+                      label: const Text('Generate Professional Report'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
