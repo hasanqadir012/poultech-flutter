@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
+import '../app_config.dart';
 import '../models/report_model.dart';
 import '../models/chat_session_model.dart';
 import '../models/chat_message_model.dart';
@@ -25,7 +26,7 @@ class DatabaseService {
   // Example: 'https://poultech-api-production.up.railway.app'
   // Local dev: use your machine's LAN IP so the physical device can reach it.
   // After Railway deploy, replace with your Railway URL (https://...).
-  static const String _baseUrl = 'http://192.168.0.44:3000';
+  static const String _baseUrl = AppConfig.backendBaseUrl;
 
   Future<String?> _getAuthToken() async {
     try {

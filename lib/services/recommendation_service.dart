@@ -4,10 +4,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../app_config.dart';
 import '../models/recommendation_model.dart';
 
 class RecommendationService {
-  static const String _baseUrl = 'http://192.168.0.44:3000';
+  static const String _baseUrl = AppConfig.backendBaseUrl;
 
   Future<Map<String, String>> _headers() async {
     try {

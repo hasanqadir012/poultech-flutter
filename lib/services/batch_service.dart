@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
+import '../app_config.dart';
 import '../models/batch_model.dart';
 
 class BatchResult {
@@ -19,7 +20,7 @@ class BatchResult {
 }
 
 class BatchService {
-  static const String _baseUrl = 'http://192.168.0.44:3000';
+  static const String _baseUrl = AppConfig.backendBaseUrl;
 
   Future<String?> _getAuthToken() async {
     try {
