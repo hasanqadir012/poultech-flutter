@@ -288,6 +288,38 @@ class _ReportCard extends StatelessWidget {
                       report.formattedDate,
                       style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
                     ),
+                    if (report.batchLabel != null) ...[
+                      const SizedBox(height: 5),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF3B82F6).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(5),
+                          border: Border.all(
+                            color: const Color(0xFF3B82F6)
+                                .withOpacity(0.25),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.label_outline,
+                                size: 10, color: Color(0xFF3B82F6)),
+                            const SizedBox(width: 4),
+                            Text(
+                              report.batchLabel!,
+                              style: const TextStyle(
+                                color: Color(0xFF3B82F6),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

@@ -98,6 +98,7 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        foregroundColor: Colors.white,
         title: const Text('Fertility Report'),
       ),
       body: Padding(

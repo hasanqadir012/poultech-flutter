@@ -28,6 +28,7 @@ class DetectionResultsScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        foregroundColor: Colors.white,
         title: const Text('Detection Results'),
       ),
       body: Padding(

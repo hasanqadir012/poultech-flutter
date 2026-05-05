@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import '../models/chat_message_model.dart';
 import '../models/chat_session_model.dart';
+import '../services/agent_service.dart';
 import '../services/database_service.dart';
-import '../services/llm_service.dart';
 
 class KnowledgeAssistantScreen extends StatefulWidget {
   const KnowledgeAssistantScreen({super.key});
@@ -17,6 +17,7 @@ class _KnowledgeAssistantScreenState extends State<KnowledgeAssistantScreen> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final DatabaseService _db = DatabaseService();
+  final AgentService _agentService = AgentService();
 
   final List<ChatMessageModel> _messages = [];
   bool _loading = false;
@@ -108,7 +109,22 @@ class _KnowledgeAssistantScreenState extends State<KnowledgeAssistantScreen> {
     }
 
     try {
-      final answer = await LLMService.getAssistantResponse(query);
+      // Fetch report history for farm-specific context (silent failure → empty list)
+      final reports = await _db.getReports();
+
+      // History = all messages before the user message just added
+      final history = _messages.length > 1
+          ? _messages.sublist(0, _messages.length - 1)
+          : <ChatMessageModel>[];
+
+      debugPrint('[CHAT] Sending to agent — reports: ${reports.length}, '
+          'history msgs: ${history.length}');
+
+      final answer = await _agentService.chatWithContext(
+        userMessage: query,
+        recentReports: reports,
+        chatHistory: history,
+      );
       final assistantMessage = ChatMessageModel(
         role: ChatRole.assistant,
         content: answer,

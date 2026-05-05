@@ -4,6 +4,7 @@ class ReportModel {
   final String? id;
   final String userId;
   final DateTime createdAt;
+  final String? batchId;
   final String? batchLabel;
   final int totalEggs;
   final int fertileEggs;
@@ -16,6 +17,7 @@ class ReportModel {
     this.id,
     required this.userId,
     required this.createdAt,
+    this.batchId,
     this.batchLabel,
     required this.totalEggs,
     required this.fertileEggs,
@@ -28,7 +30,6 @@ class ReportModel {
   Map<String, dynamic> toJson() => {
         'userId': userId,
         'createdAt': createdAt.toIso8601String(),
-        'batchLabel': batchLabel,
         'totalEggs': totalEggs,
         'fertileEggs': fertileEggs,
         'infertileEggs': infertileEggs,
@@ -42,6 +43,7 @@ class ReportModel {
       id: json['_id']?.toString(),
       userId: json['userId'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
+      batchId: json['batchId'] as String?,
       batchLabel: json['batchLabel'] as String?,
       totalEggs: (json['totalEggs'] as num).toInt(),
       fertileEggs: (json['fertileEggs'] as num).toInt(),
