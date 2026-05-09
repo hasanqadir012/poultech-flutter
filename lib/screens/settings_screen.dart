@@ -28,15 +28,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadPreferences() async {
+    // Load local prefs first (instant) so UI shows correct values immediately.
     final prefs = await SharedPreferences.getInstance();
-    final backendTime = await UserSettingsService().getAnalysisTime();
     if (mounted) {
       setState(() {
         _trendWindowDays = prefs.getInt('trend_window_days') ?? 14;
         _summaryDayOfWeek = prefs.getInt('summary_day_of_week') ?? 1;
-        _analysisHour = prefs.getInt('analysis_hour') ?? backendTime.hour;
-        _analysisMinute = prefs.getInt('analysis_minute') ?? backendTime.minute;
+        _analysisHour = prefs.getInt('analysis_hour') ?? 21;
+        _analysisMinute = prefs.getInt('analysis_minute') ?? 0;
       });
+    }
+
+    // If no local analysis time saved yet, fetch from backend as fallback.
+    if (prefs.getInt('analysis_hour') == null) {
+      final backendTime = await UserSettingsService().getAnalysisTime();
+      if (mounted) {
+        setState(() {
+          _analysisHour = backendTime.hour;
+          _analysisMinute = backendTime.minute;
+        });
+      }
     }
   }
 

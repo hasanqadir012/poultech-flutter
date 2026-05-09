@@ -1,15 +1,27 @@
 'use strict';
 
 const { TREND_DAILY_STATS_WINDOW, RECS_RECENT_REPORTS } = require('../config');
-const { aggregateTodayStats } = require('./daily_stats_service');
+const { getPktNow, getPktMidnightAsUtc, aggregateTodayStats } = require('./daily_stats_service');
 const { generateTrendFromDailyStats } = require('./trend_service');
 const { generateRecommendations } = require('./recommendation_service');
 
 // Main daily analysis orchestrator.
 // Aggregates today's detections, generates trend and recommendations.
-// Safe to call multiple times — shouldRunAnalysis guards against double-runs.
+// Idempotent: skips if trend already generated during today's PKT day.
 async function runDailyAnalysis(userId, db) {
   console.log(`[DAILY_ANALYSIS] Starting — userId: ${userId}`);
+
+  // Guard: if a trend was already generated during today's PKT day, skip.
+  // Prevents duplicates when multiple requests slip through shouldRunAnalysis concurrently.
+  const todayPktMidnight = getPktMidnightAsUtc(getPktNow());
+  const existingTrend = await db.collection('trends').findOne({
+    userId,
+    generatedAt: { $gte: todayPktMidnight },
+  });
+  if (existingTrend) {
+    console.log(`[DAILY_ANALYSIS] Trend already generated today — skipping. userId: ${userId}`);
+    return null;
+  }
 
   // 1. Aggregate today's reports into daily_stats (idempotent upsert)
   const todayStats = await aggregateTodayStats(userId, db);

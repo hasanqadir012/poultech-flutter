@@ -19,6 +19,8 @@ import 'settings_screen.dart';
 import 'trends_screen.dart';
 import 'upload_screen.dart';
 
+enum _SummaryBadge { sample, fresh, current, previous }
+
 class HomeDashboard extends StatefulWidget {
   const HomeDashboard({super.key});
 
@@ -40,6 +42,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   TrendModel? _latestTrend;
   RecommendationsModel? _latestRecommendations;
   SummaryModel? _latestSummary;
+  bool _summaryDismissed = false;
   int _trendWindowDays = 14;
 
   // Skeleton pulse animation
@@ -142,11 +145,25 @@ class _HomeDashboardState extends State<HomeDashboard>
       _latestRecommendations == null &&
       (_latestSummary == null || !_latestSummary!.isCurrentPeriod);
 
+  _SummaryBadge get _summaryBadge {
+    final s = _latestSummary;
+    if (s == null) return _SummaryBadge.sample;
+    final ageDays = DateTime.now().difference(s.generatedAt).inDays;
+    if (ageDays <= 2 && s.isCurrentPeriod) return _SummaryBadge.fresh;
+    if (s.isCurrentPeriod) return _SummaryBadge.current;
+    return _SummaryBadge.previous;
+  }
+
   bool get _shouldShowSummary {
+    if (_summaryDismissed) return false;
     final s = _latestSummary;
     if (s == null || s.isRead) return false;
     return s.isCurrentPeriod;
   }
+
+  // Show sample only when no real summary has ever been generated for this user
+  bool get _shouldShowSampleSummary =>
+      !_isLoading && !_summaryDismissed && _latestSummary == null;
 
   // ── Build ──────────────────────────────────────────────────────────────────
 
@@ -198,9 +215,12 @@ class _HomeDashboardState extends State<HomeDashboard>
           _buildBatchStatusCard(),
           const SizedBox(height: 12),
 
-          // ── Weekly summary banner (current period only) ────────────────
+          // ── Weekly summary banner ─────────────────────────────────────
           if (_shouldShowSummary) ...[
-            _buildWeeklySummaryBanner(_latestSummary!),
+            _buildWeeklySummaryBanner(_latestSummary!, badge: _summaryBadge),
+            const SizedBox(height: 12),
+          ] else if (_shouldShowSampleSummary) ...[
+            _buildWeeklySummaryBanner(_sampleSummary(), badge: _SummaryBadge.sample),
             const SizedBox(height: 12),
           ],
 
@@ -869,29 +889,67 @@ class _HomeDashboardState extends State<HomeDashboard>
 
   // ── Weekly Summary Card ────────────────────────────────────────────────────
 
+  static SummaryModel _sampleSummary() {
+    final now = DateTime.now();
+    return SummaryModel(
+      id: '__sample__',
+      userId: '',
+      weekStart: now.subtract(const Duration(days: 7)),
+      weekEnd: now.subtract(const Duration(days: 1)),
+      generatedAt: now,
+      reportCount: 34,
+      totalEggsAnalyzed: 1700,
+      totalFertileEggs: 1394,
+      totalInfertileEggs: 306,
+      averageFertilityRate: 0.82,
+      highestFertilityRate: 0.91,
+      lowestFertilityRate: 0.71,
+      bestBatchLabel: 'Batch A-3',
+      worstBatchLabel: 'Batch B-7',
+      batchesActive: 4,
+      agentSummary:
+          'This is a preview of your upcoming weekly summary. Once you have run '
+          'detections for a full week, your personalized AI performance review will appear here — '
+          'covering your hatchery\'s fertility trends, top and lowest-performing batches, '
+          'and targeted improvement recommendations. '
+          'Run daily detections to build your data; your first real summary will appear '
+          'automatically on your configured summary day.',
+      isRead: false,
+    );
+  }
+
   // ── Weekly Summary — compact banner on dashboard ───────────────────────────
 
-  Widget _buildWeeklySummaryBanner(SummaryModel s) {
+  Widget _buildWeeklySummaryBanner(SummaryModel s, {_SummaryBadge badge = _SummaryBadge.current}) {
+    final (badgeLabel, badgeColor) = switch (badge) {
+      _SummaryBadge.sample   => ('SAMPLE · TAP TO PREVIEW', const Color(0xFFF97316)),
+      _SummaryBadge.fresh    => ('NEW THIS WEEK', const Color(0xFF22C55E)),
+      _SummaryBadge.current  => ('WEEKLY SUMMARY READY', const Color(0xFF3B82F6)),
+      _SummaryBadge.previous => ('PREVIOUS WEEK', const Color(0xFF64748B)),
+    };
+
     return GestureDetector(
-      onTap: () => _showSummaryBottomSheet(s),
+      onTap: () => _showSummaryBottomSheet(s, isSample: badge == _SummaryBadge.sample),
       child: Container(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         decoration: BoxDecoration(
           color: const Color(0xFF1E293B),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF334155)),
+          border: Border.all(color: badgeColor.withValues(alpha: 0.35)),
         ),
         child: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
+                color: badgeColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(
-                Icons.summarize_outlined,
-                color: Color(0xFF3B82F6),
+              child: Icon(
+                badge == _SummaryBadge.sample
+                    ? Icons.preview_outlined
+                    : Icons.summarize_outlined,
+                color: badgeColor,
                 size: 18,
               ),
             ),
@@ -900,10 +958,10 @@ class _HomeDashboardState extends State<HomeDashboard>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'WEEKLY SUMMARY READY',
+                  Text(
+                    badgeLabel,
                     style: TextStyle(
-                      color: Color(0xFF3B82F6),
+                      color: badgeColor,
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.8,
@@ -920,7 +978,9 @@ class _HomeDashboardState extends State<HomeDashboard>
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${s.reportCount} detections · ${s.totalEggsAnalyzed} eggs · Avg ${s.averagePercent}',
+                    badge == _SummaryBadge.sample
+                        ? 'Sample data · See how your summary will look'
+                        : '${s.reportCount} detections · ${s.totalEggsAnalyzed} eggs · Avg ${s.averagePercent}',
                     style: const TextStyle(
                       color: Color(0xFF64748B),
                       fontSize: 12,
@@ -943,17 +1003,20 @@ class _HomeDashboardState extends State<HomeDashboard>
 
   // ── Weekly Summary — full bottom sheet ────────────────────────────────────
 
-  void _showSummaryBottomSheet(SummaryModel s) {
+  void _showSummaryBottomSheet(SummaryModel s, {bool isSample = false}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _SummaryBottomSheet(
         summary: s,
-        onDismiss: () async {
-          await _summaryService.markRead(s.id);
-          if (mounted) setState(() => _latestSummary = null);
-        },
+        isSample: isSample,
+        onDismiss: isSample
+            ? null
+            : () async {
+                await _summaryService.markRead(s.id);
+                if (mounted) setState(() => _summaryDismissed = true);
+              },
       ),
     );
   }
@@ -1183,11 +1246,13 @@ class _HomeDashboardState extends State<HomeDashboard>
 
 class _SummaryBottomSheet extends StatelessWidget {
   final SummaryModel summary;
-  final VoidCallback onDismiss;
+  final bool isSample;
+  final VoidCallback? onDismiss;
 
   const _SummaryBottomSheet({
     required this.summary,
-    required this.onDismiss,
+    this.isSample = false,
+    this.onDismiss,
   });
 
   @override
@@ -1232,9 +1297,28 @@ class _SummaryBottomSheet extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Weekly Summary',
-                          style: TextStyle(
+                        if (isSample)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF97316).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFFF97316).withValues(alpha: 0.4)),
+                            ),
+                            child: const Text(
+                              'SAMPLE PREVIEW',
+                              style: TextStyle(
+                                color: Color(0xFFF97316),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                          ),
+                        Text(
+                          isSample ? 'Sample Weekly Summary' : 'Weekly Summary',
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -1254,7 +1338,7 @@ class _SummaryBottomSheet extends StatelessWidget {
                   GestureDetector(
                     onTap: () {
                       Navigator.pop(context);
-                      onDismiss();
+                      if (!isSample) onDismiss?.call();
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -1263,9 +1347,9 @@ class _SummaryBottomSheet extends StatelessWidget {
                         color: const Color(0xFF334155),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Text(
-                        'Dismiss',
-                        style: TextStyle(
+                      child: Text(
+                        isSample ? 'Got it' : 'Dismiss',
+                        style: const TextStyle(
                           color: Color(0xFF94A3B8),
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
@@ -1286,6 +1370,34 @@ class _SummaryBottomSheet extends StatelessWidget {
                 controller: scrollController,
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
                 children: [
+                  // ── Sample notice ──────────────────────────────────────
+                  if (isSample) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF97316).withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFF97316).withValues(alpha: 0.25)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.info_outline, color: Color(0xFFF97316), size: 15),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'This is a preview using sample data. Your real summary replaces it once generated.',
+                              style: TextStyle(
+                                color: Color(0xFFF97316),
+                                fontSize: 12,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   // ── At-a-glance stats row ──────────────────────────────
                   Row(
                     children: [

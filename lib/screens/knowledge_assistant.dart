@@ -220,12 +220,6 @@ class _KnowledgeAssistantScreenState extends State<KnowledgeAssistantScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const chips = [
-      'Optimal incubation temperature?',
-      'How to improve fertility rate?',
-      'Best practices for egg storage',
-    ];
-
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
@@ -234,7 +228,7 @@ class _KnowledgeAssistantScreenState extends State<KnowledgeAssistantScreen> {
         title: Column(
           children: [
             const Text(
-              'Knowledge Assistant',
+              'AI Hatchery Assistant',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             if (_messages.isNotEmpty)
@@ -246,13 +240,11 @@ class _KnowledgeAssistantScreenState extends State<KnowledgeAssistantScreen> {
         ),
         centerTitle: true,
         actions: [
-          // History button
           IconButton(
             icon: Icon(Icons.history_rounded, color: Colors.white.withOpacity(0.7)),
             tooltip: 'Past conversations',
             onPressed: _historyLoading ? null : _openHistory,
           ),
-          // New conversation button
           if (_messages.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -290,83 +282,10 @@ class _KnowledgeAssistantScreenState extends State<KnowledgeAssistantScreen> {
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF3B82F6)))
           : Column(
               children: [
-                // Quick question chips (only when no messages)
-                if (_messages.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Quick Questions',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.6),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: chips.map((text) {
-                            return GestureDetector(
-                              onTap: _loading ? null : () => _askAssistant(text),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 9),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.07),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                      color: Colors.white.withOpacity(0.15)),
-                                ),
-                                child: Text(
-                                  text,
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 13),
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                // Messages list
+                // Messages list or rich empty state
                 Expanded(
                   child: _messages.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(24),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFA855F7).withOpacity(0.1),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  Icons.psychology_outlined,
-                                  size: 56,
-                                  color:
-                                      const Color(0xFFA855F7).withOpacity(0.7),
-                                ),
-                              ),
-                              const SizedBox(height: 20),
-                              Text(
-                                'Ask me anything about eggs,\nfertility, and incubation',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.5),
-                                  fontSize: 16,
-                                  height: 1.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
+                      ? _buildEmptyState()
                       : ListView.builder(
                           controller: _scrollController,
                           padding: const EdgeInsets.symmetric(
@@ -485,6 +404,220 @@ class _KnowledgeAssistantScreenState extends State<KnowledgeAssistantScreen> {
     );
   }
 
+  // ── Empty state ────────────────────────────────────────────────────────────
+
+  Widget _buildEmptyState() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Welcome card ───────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFFA855F7).withValues(alpha: 0.15),
+                  const Color(0xFF3B82F6).withValues(alpha: 0.07),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFA855F7).withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFA855F7).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.psychology_outlined,
+                      color: Color(0xFFA855F7), size: 28),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Text(
+                            'Reads Your Real Data',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          _DataBadge(),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'This assistant has access to your actual detection reports, '
+                        'fertility rates, and batch history — not generic answers. '
+                        'Ask about your own hatchery.',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.6),
+                          fontSize: 12,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── Your data questions ────────────────────────────────────────
+          _buildCategoryHeader(
+            icon: Icons.bar_chart_rounded,
+            color: const Color(0xFFA855F7),
+            label: 'FROM YOUR REPORTS',
+            subtitle: 'Answered using your actual detection data',
+          ),
+          const SizedBox(height: 10),
+          _buildQuestionRow(
+            'How has my fertility rate changed over the past week?',
+            const Color(0xFFA855F7),
+          ),
+          _buildQuestionRow(
+            'Which of my batches is performing best right now?',
+            const Color(0xFFA855F7),
+          ),
+          _buildQuestionRow(
+            'Why might my fertility have dropped in recent detections?',
+            const Color(0xFFA855F7),
+          ),
+          _buildQuestionRow(
+            'Give me a summary of my last 5 detection results.',
+            const Color(0xFFA855F7),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── General hatchery knowledge ─────────────────────────────────
+          _buildCategoryHeader(
+            icon: Icons.menu_book_outlined,
+            color: const Color(0xFF3B82F6),
+            label: 'HATCHERY EXPERTISE',
+            subtitle: 'General poultry farming knowledge',
+          ),
+          const SizedBox(height: 10),
+          _buildQuestionRow(
+            'What is the ideal incubation temperature and humidity?',
+            const Color(0xFF3B82F6),
+          ),
+          _buildQuestionRow(
+            'How can I improve rooster fertility in my broiler flock?',
+            const Color(0xFF3B82F6),
+          ),
+          _buildQuestionRow(
+            'What are signs of poor egg storage conditions?',
+            const Color(0xFF3B82F6),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryHeader({
+    required IconData icon,
+    required Color color,
+    required String label,
+    required String subtitle,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: color, size: 14),
+        ),
+        const SizedBox(width: 10),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
+              ),
+            ),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.35),
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQuestionRow(String question, Color accentColor) {
+    return GestureDetector(
+      onTap: _loading ? null : () => _askAssistant(question),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.fromLTRB(0, 0, 14, 0),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF334155)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 4,
+              height: 48,
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.6),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  bottomLeft: Radius.circular(12),
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                question,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13.5,
+                  height: 1.4,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(Icons.arrow_forward_ios_rounded,
+                color: Colors.white.withValues(alpha: 0.25), size: 13),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Message bubble ─────────────────────────────────────────────────────────
+
   Widget _buildMessageBubble(ChatMessageModel message) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -554,6 +687,40 @@ class _KnowledgeAssistantScreenState extends State<KnowledgeAssistantScreen> {
                   const Icon(Icons.person, color: Colors.white, size: 20),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Data connected badge ──────────────────────────────────────────────────────
+
+class _DataBadge extends StatelessWidget {
+  const _DataBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.35)),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.circle, color: Color(0xFF22C55E), size: 6),
+          SizedBox(width: 4),
+          Text(
+            'DATA CONNECTED',
+            style: TextStyle(
+              color: Color(0xFF22C55E),
+              fontSize: 8.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+            ),
+          ),
         ],
       ),
     );

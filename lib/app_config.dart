@@ -2,7 +2,7 @@
 /// Change a value here and it applies everywhere it is referenced.
 abstract final class AppConfig {
   /// Backend base URL — swap to Railway URL before production deployment.
-  static const String backendBaseUrl = 'http://192.168.0.44:3000';
+  static const String backendBaseUrl = 'https://poultech-backend-production.up.railway.app';
 
   /// Reports sent to the Knowledge Assistant (Gemini chat) as context.
   static const int chatContextReports = 20;

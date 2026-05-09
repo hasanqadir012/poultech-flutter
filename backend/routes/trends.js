@@ -11,22 +11,20 @@ function initDb(database) {
   db = database;
 }
 
-// GET /trends/latest?days=N — most recent trend for this user with the given window
+// GET /trends/latest — most recent trend for this user (windowDays filter removed:
+// stored windowDays = actual data length, not user's chart selector, so filtering
+// by it caused new users to never see trends)
 router.get('/latest', async (req, res) => {
   try {
-    const windowDays = parseInt(req.query.days ?? '14', 10);
-    const validWindows = [7, 14, 30];
-    const days = validWindows.includes(windowDays) ? windowDays : 14;
-
     const trend = await db
       .collection('trends')
       .findOne(
-        { userId: req.userId, windowDays: days },
+        { userId: req.userId },
         { sort: { generatedAt: -1 } },
       );
 
     console.log(
-      `[TRENDS] GET /latest — userId: ${req.userId}, days: ${days}, found: ${!!trend}`,
+      `[TRENDS] GET /latest — userId: ${req.userId}, found: ${!!trend}, windowDays: ${trend?.windowDays ?? 'n/a'}`,
     );
     res.json(trend ?? null);
   } catch (err) {
@@ -35,18 +33,27 @@ router.get('/latest', async (req, res) => {
   }
 });
 
-// GET /trends — full trend history for this user, newest first
+const PKT_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+// GET /trends — full trend history for this user, newest first (one per PKT day)
 router.get('/', async (req, res) => {
   try {
     const trends = await db
       .collection('trends')
       .find({ userId: req.userId })
       .sort({ generatedAt: -1 })
-      .limit(20)
+      .limit(60)
       .toArray();
 
-    console.log(`[TRENDS] GET / — userId: ${req.userId}, count: ${trends.length}`);
-    res.json(trends);
+    // Deduplicate: keep the first (most recent) trend per PKT day
+    const seen = new Set();
+    const deduped = trends.filter((t) => {
+      const pktDate = new Date(t.generatedAt.getTime() + PKT_OFFSET_MS).toISOString().slice(0, 10);
+      return seen.has(pktDate) ? false : (seen.add(pktDate), true);
+    }).slice(0, 20);
+
+    console.log(`[TRENDS] GET / — userId: ${req.userId}, count: ${deduped.length}`);
+    res.json(deduped);
   } catch (err) {
     console.error(`[TRENDS] GET / error: ${err.message}`);
     res.status(500).json({ error: 'Failed to fetch trends.' });
