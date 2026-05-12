@@ -81,13 +81,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('analysis_hour', picked.hour);
     await prefs.setInt('analysis_minute', picked.minute);
-    UserSettingsService().setAnalysisTime(picked.hour, picked.minute);
     if (mounted) {
       setState(() {
         _analysisHour = picked.hour;
         _analysisMinute = picked.minute;
       });
     }
+    // Await backend save — was fire-and-forget before, which could leave the
+    // server using stale default values (21:00) while the UI showed the new time.
+    await UserSettingsService().setAnalysisTime(picked.hour, picked.minute);
   }
 
   String _formatAnalysisTime() {

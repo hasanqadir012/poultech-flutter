@@ -16,7 +16,7 @@ const { router: recommendationsRouter, initDb: initRecommendationsDb } = require
 const { router: summariesRouter, initDb: initSummariesDb } = require('./routes/summaries');
 const { router: userSettingsRouter, initDb: initUserSettingsDb } = require('./routes/user-settings');
 const { router: dailyStatsRouter, initDb: initDailyStatsDb } = require('./routes/daily-stats');
-const { getPktNow } = require('./services/daily_stats_service');
+const { getPktNow, getPktHours, getPktMinutes } = require('./services/daily_stats_service');
 const { runDailyAnalysis } = require('./services/daily_analysis_service');
 
 const app = express();
@@ -95,8 +95,8 @@ async function start() {
   cron.schedule('* * * * *', async () => {
     try {
       const nowPkt = getPktNow();
-      const h = nowPkt.getHours();
-      const m = nowPkt.getMinutes();
+      const h = getPktHours(nowPkt);
+      const m = getPktMinutes(nowPkt);
 
       const dueUsers = await db
         .collection('user_settings')

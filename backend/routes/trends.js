@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { getTodayLive, shouldRunAnalysis } = require('../services/daily_stats_service');
+const { getTodayLive, shouldRunAnalysis, backfillMissedDays } = require('../services/daily_stats_service');
 const { runDailyAnalysis } = require('../services/daily_analysis_service');
 
 let db;
@@ -76,6 +76,12 @@ router.get('/today', async (req, res) => {
 // Returns { ran: true } if analysis ran, { ran: false, reason } if skipped
 router.post('/run-daily-analysis', async (req, res) => {
   try {
+    // Always backfill missed past days on app open — recovers orphaned reports
+    // even when shouldRunAnalysis would return false (e.g. before scheduled time).
+    await backfillMissedDays(req.userId, db, 7).catch((err) =>
+      console.error(`[TRENDS] backfill failed — userId: ${req.userId}: ${err.message}`),
+    );
+
     const should = await shouldRunAnalysis(req.userId, db);
     if (!should) {
       const nowPkt = new Date(Date.now() + 5 * 60 * 60 * 1000);
@@ -94,6 +100,47 @@ router.post('/run-daily-analysis', async (req, res) => {
   } catch (err) {
     console.error(`[TRENDS] run-daily-analysis error: ${err.message}`);
     res.status(500).json({ error: 'Failed to trigger analysis.' });
+  }
+});
+
+// POST /trends/force-regenerate — DEV/UTILITY route.
+// Clears today's trend and recommendation docs, then re-runs the analysis.
+// Bypasses the same-day idempotency guard so you can iterate on prompts/code
+// without having to wait until tomorrow.
+router.post('/force-regenerate', async (req, res) => {
+  try {
+    const PKT_OFFSET_MS = 5 * 60 * 60 * 1000;
+    const nowPkt = new Date(Date.now() + PKT_OFFSET_MS);
+    const todayPktMidnightUtc = new Date(
+      Date.UTC(nowPkt.getUTCFullYear(), nowPkt.getUTCMonth(), nowPkt.getUTCDate()) - PKT_OFFSET_MS,
+    );
+
+    const trendsDeleted = await db.collection('trends').deleteMany({
+      userId: req.userId,
+      generatedAt: { $gte: todayPktMidnightUtc },
+    });
+    const recsDeleted = await db.collection('recommendations').deleteMany({
+      userId: req.userId,
+      generatedAt: { $gte: todayPktMidnightUtc },
+    });
+
+    console.log(
+      `[TRENDS] force-regenerate — userId: ${req.userId}, ` +
+      `cleared trends: ${trendsDeleted.deletedCount}, recs: ${recsDeleted.deletedCount}`,
+    );
+
+    res.json({
+      ran: true,
+      forced: true,
+      cleared: { trends: trendsDeleted.deletedCount, recommendations: recsDeleted.deletedCount },
+    });
+
+    runDailyAnalysis(req.userId, db).catch((err) => {
+      console.error(`[TRENDS] force-regenerate run failed — userId: ${req.userId}: ${err.message}`);
+    });
+  } catch (err) {
+    console.error(`[TRENDS] force-regenerate error: ${err.message}`);
+    res.status(500).json({ error: 'Failed to force regenerate.' });
   }
 });
 

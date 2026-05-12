@@ -143,7 +143,7 @@ class _HomeDashboardState extends State<HomeDashboard>
   bool get _isNewUser =>
       (_latestTrend == null || _latestTrend!.hasInsufficientData) &&
       _latestRecommendations == null &&
-      (_latestSummary == null || !_latestSummary!.isCurrentPeriod);
+      _latestSummary == null;
 
   _SummaryBadge get _summaryBadge {
     final s = _latestSummary;
@@ -158,7 +158,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     if (_summaryDismissed) return false;
     final s = _latestSummary;
     if (s == null || s.isRead) return false;
-    return s.isCurrentPeriod;
+    return true; // Show regardless of age — the badge indicates fresh/current/previous
   }
 
   // Show sample only when no real summary has ever been generated for this user

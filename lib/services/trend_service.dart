@@ -112,6 +112,26 @@ class TrendService {
     }
   }
 
+  /// Force-regenerate today's trend and recommendations.
+  /// Bypasses the same-day idempotency guard by deleting today's docs first.
+  /// Returns true if the backend accepted the request. The new docs are
+  /// written async — callers should refetch after a short delay.
+  Future<bool> forceRegenerate() async {
+    debugPrint('[TREND] forceRegenerate');
+    try {
+      final headers = await _headers();
+      final response = await http
+          .post(Uri.parse('$_baseUrl/trends/force-regenerate'), headers: headers)
+          .timeout(const Duration(seconds: 30));
+
+      debugPrint('[TREND] POST /force-regenerate → status: ${response.statusCode}, body: ${response.body}');
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('[TREND] forceRegenerate error: $e');
+      return false;
+    }
+  }
+
   /// Returns daily aggregated stats for the chart (one entry per day, oldest first).
   Future<List<DailyStatModel>> getDailyStats({int days = 14}) async {
     debugPrint('[TREND] getDailyStats — days: $days');

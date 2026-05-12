@@ -1,7 +1,7 @@
 'use strict';
 
 const { TREND_DAILY_STATS_WINDOW, RECS_RECENT_REPORTS } = require('../config');
-const { getPktNow, getPktMidnightAsUtc, aggregateTodayStats } = require('./daily_stats_service');
+const { getPktNow, getPktMidnightAsUtc, aggregateTodayStats, backfillMissedDays } = require('./daily_stats_service');
 const { generateTrendFromDailyStats } = require('./trend_service');
 const { generateRecommendations } = require('./recommendation_service');
 
@@ -23,12 +23,13 @@ async function runDailyAnalysis(userId, db) {
     return null;
   }
 
-  // 1. Aggregate today's reports into daily_stats (idempotent upsert)
+  // 1a. Backfill any past days (last 7) that have orphaned reports but no
+  //     daily_stats — recovers data when analysis never ran on a previous day.
+  await backfillMissedDays(userId, db, 7);
+
+  // 1b. Aggregate today's reports into daily_stats (may be null if 0 today —
+  //     that's OK: backfilled past days still let us generate a trend)
   const todayStats = await aggregateTodayStats(userId, db);
-  if (!todayStats || todayStats.detectionCount === 0) {
-    console.log(`[DAILY_ANALYSIS] No detections today — skipping trend+recs. userId: ${userId}`);
-    return null;
-  }
 
   // 2. Fetch daily_stats sorted oldest→newest for trend computation
   const dailyStats = await db
@@ -39,7 +40,7 @@ async function runDailyAnalysis(userId, db) {
     .toArray();
 
   if (dailyStats.length < 1) {
-    console.log(`[DAILY_ANALYSIS] No daily_stats found after aggregation — userId: ${userId}`);
+    console.log(`[DAILY_ANALYSIS] No daily_stats found (today or backfill) — skipping. userId: ${userId}`);
     return null;
   }
 
@@ -67,8 +68,8 @@ async function runDailyAnalysis(userId, db) {
     }
   }
 
-  console.log(`[DAILY_ANALYSIS] Complete — userId: ${userId}, detections: ${todayStats.detectionCount}`);
-  return todayStats;
+  console.log(`[DAILY_ANALYSIS] Complete — userId: ${userId}, today detections: ${todayStats?.detectionCount ?? 0}, dailyStats: ${dailyStats.length}`);
+  return todayStats ?? dailyStats[dailyStats.length - 1];
 }
 
 module.exports = { runDailyAnalysis };

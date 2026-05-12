@@ -520,7 +520,15 @@ class _TrendsScreenState extends State<TrendsScreen> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 22,
+                        interval: 1, // force ticks at integer positions only
                         getTitlesWidget: (value, meta) {
+                          // Reject ticks that aren't on an integer index — fl_chart
+                          // can still emit fractional ticks at the boundaries, and
+                          // value.round() would collapse two of them to the same
+                          // index, duplicating the label (e.g. "May 9, May 9").
+                          if ((value - value.roundToDouble()).abs() > 0.01) {
+                            return const SizedBox.shrink();
+                          }
                           final idx = value.round();
                           if (idx < 0 || idx >= _dailyStats.length) return const SizedBox.shrink();
                           // Show label only for first, middle, last

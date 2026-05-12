@@ -12,7 +12,8 @@ async function callGemini(prompt) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 500, temperature: 0.35 },
+      // Bumped from 500 → 1000 to accommodate the richer 9-12 sentence review
+      generationConfig: { maxOutputTokens: 1000, temperature: 0.4 },
     }),
   });
 
@@ -23,6 +24,33 @@ async function callGemini(prompt) {
 
   const data = await response.json();
   return data.candidates[0].content.parts[0].text.trim();
+}
+
+// Group reports by batch label and compute per-batch fertility averages.
+// Returns array sorted by avg fertility descending. Used both for the prompt
+// (so Gemini can write batch-level analysis) and the fallback prose.
+function computeBatchBreakdown(reports) {
+  const byLabel = new Map();
+  for (const r of reports) {
+    const label = r.batchLabel || 'Unlabeled';
+    if (!byLabel.has(label)) {
+      byLabel.set(label, { count: 0, sumRate: 0, eggs: 0, fertile: 0 });
+    }
+    const b = byLabel.get(label);
+    b.count += 1;
+    b.sumRate += r.fertilityRate;
+    b.eggs += r.totalEggs;
+    b.fertile += r.fertileEggs;
+  }
+  return Array.from(byLabel.entries())
+    .map(([label, b]) => ({
+      label,
+      count: b.count,
+      avgRate: b.sumRate / b.count,
+      eggs: b.eggs,
+      fertile: b.fertile,
+    }))
+    .sort((a, b) => b.avgRate - a.avgRate);
 }
 
 function fmtDate(d) {
@@ -77,8 +105,17 @@ async function generateWeeklySummary(userId, weekStart, weekEnd, db) {
     ? `- Active batches this week: ${batchesActive}`
     : '';
 
+  // Per-batch breakdown — enables Gemini to write batch-level analysis
+  const batchBreakdown = computeBatchBreakdown(reports);
+  const batchBreakdownStr = batchBreakdown
+    .map((b) =>
+      `  • ${b.label}: ${b.count} detection${b.count > 1 ? 's' : ''}, ` +
+      `${b.eggs} eggs analyzed, avg ${(b.avgRate * 100).toFixed(1)}% fertility`,
+    )
+    .join('\n');
+
   const prompt =
-    `You are an agricultural performance analyst writing a formal weekly report for a poultry hatchery manager.\n\n` +
+    `You are an agricultural performance analyst writing a detailed weekly report for a poultry hatchery manager in Pakistan.\n\n` +
     `Weekly detection data (${weekStartFmt} to ${weekEndFmt}):\n` +
     `- Total detections run: ${reportCount}\n` +
     `- Total eggs analyzed: ${totalEggsAnalyzed}\n` +
@@ -88,31 +125,51 @@ async function generateWeeklySummary(userId, weekStart, weekEnd, db) {
     `- Best single detection: ${bestLabel}\n` +
     `- Worst single detection: ${worstLabel}\n` +
     (batchesNote ? `${batchesNote}\n` : '') +
-    `\n` +
-    `Write a comprehensive weekly performance review covering ALL of the following points in order:\n` +
-    `1. Overall volume: how many detections were run and total eggs processed.\n` +
-    `2. Fertility results: exact fertile vs infertile counts and the average rate. State clearly whether ${avgPct}% is healthy (above 65%), borderline (50-65%), or poor (below 50%).\n` +
-    `3. Performance range: the best and worst single detection results this week, naming the batch if one is provided.\n` +
-    `4. Consistency assessment: comment on whether performance was consistent or variable based on the gap between best (${bestLabel}) and worst (${worstLabel}).\n` +
-    `5. Operational context: if multiple batches were active, note that. If only one batch, note that.\n` +
-    `6. Recommendation: one specific, practical action the farmer should take next week based on this week's results.\n` +
-    `\n` +
-    `Requirements: Write 6-8 sentences in plain conversational prose. No bullet points, no markdown, no headers. ` +
-    `Reference the actual numbers throughout. Be direct and professional. Under 250 words.`;
+    `\nPer-batch breakdown (sorted best to worst):\n${batchBreakdownStr}\n\n` +
+    `Write a comprehensive 9-12 sentence weekly performance review covering ALL of the following in order:\n` +
+    `1. Overall activity volume — how many detections were run and total eggs processed.\n` +
+    `2. Fertility result — exact fertile (${totalFertileEggs}) vs infertile (${totalInfertileEggs}) counts and the ${avgPct}% average. State clearly whether this is healthy (above 65%), borderline (50-65%), or poor (below 50%).\n` +
+    `3. Best vs worst single detection — name the batch labels and give the exact percentages.\n` +
+    `4. BATCH COMPARISON — using the per-batch breakdown above, explicitly name which batch performed best on average and which worst, with their averages. Comment on what the gap between top and bottom batch suggests (consistent breeding conditions vs. uneven management).\n` +
+    `5. Consistency assessment — comment on the spread between the highest (${highPct}%) and lowest (${lowPct}%) detection.\n` +
+    `6. Operational context — single vs multiple batches active; what that means for trust in the average.\n` +
+    `7. Recommendation — one specific, practical action the farmer should take next week based on the worst-performing batch or the trend, naming the batch if relevant.\n\n` +
+    `Requirements: Write 9-12 sentences in plain conversational prose. No bullet points, no markdown, no headers. ` +
+    `Reference exact numbers and batch labels throughout. Be direct and professional. Under 350 words.`;
 
   let agentSummary;
   try {
     agentSummary = await callGemini(prompt);
   } catch (err) {
     console.error(`[SUMMARY] Gemini failed — userId: ${userId}: ${err.message}`);
+    // Richer data-driven fallback — references the per-batch breakdown so the
+    // user still gets batch-level commentary even when Gemini is unavailable.
+    const healthBand = parseFloat(avgPct) >= 65
+      ? 'within a healthy range for commercial hatchery operations'
+      : parseFloat(avgPct) >= 50
+        ? 'in the borderline range and warrants close monitoring'
+        : 'below the healthy threshold of 65% and requires immediate attention';
+    let batchSentences = '';
+    if (batchBreakdown.length > 1) {
+      const top = batchBreakdown[0];
+      const bottom = batchBreakdown[batchBreakdown.length - 1];
+      const gap = ((top.avgRate - bottom.avgRate) * 100).toFixed(0);
+      batchSentences =
+        `Looking batch-by-batch, ${top.label} led with a ${(top.avgRate * 100).toFixed(1)}% average across ${top.count} detection${top.count > 1 ? 's' : ''}, ` +
+        `while ${bottom.label} trailed at ${(bottom.avgRate * 100).toFixed(1)}% over ${bottom.count} detection${bottom.count > 1 ? 's' : ''}. ` +
+        `That ${gap}-point gap between your top and bottom batch suggests management or environmental conditions were not uniform this week. `;
+    } else if (batchBreakdown.length === 1) {
+      const only = batchBreakdown[0];
+      batchSentences = `All detections came from ${only.label}, which averaged ${(only.avgRate * 100).toFixed(1)}% fertility across ${only.count} run${only.count > 1 ? 's' : ''}. `;
+    }
     agentSummary =
       `This week you ran ${reportCount} detection${reportCount === 1 ? '' : 's'} and analyzed ${totalEggsAnalyzed} eggs in total. ` +
       `Of those, ${totalFertileEggs} were classified as fertile and ${totalInfertileEggs} as infertile, ` +
-      `giving an average fertility rate of ${avgPct}%. ` +
-      `${parseFloat(avgPct) >= 65 ? 'This is within a healthy range for commercial hatchery operations.' : parseFloat(avgPct) >= 50 ? 'This is in the borderline range and warrants close monitoring.' : 'This is below the healthy threshold of 65% and requires immediate attention.'} ` +
-      `Your best detection this week achieved ${bestLabel}, while the lowest result was ${worstLabel}. ` +
-      `${batchesActive > 1 ? `You had ${batchesActive} active batches during this period.` : 'All detections were part of a single active batch.'} ` +
-      `For next week, focus on identifying the cause of any below-average results and maintain your current detection frequency to support trend analysis.`;
+      `giving an average fertility rate of ${avgPct}%, which is ${healthBand}. ` +
+      `Your best single detection this week achieved ${bestLabel}, while the lowest result was ${worstLabel}. ` +
+      batchSentences +
+      `${batchesActive > 1 ? `You had ${batchesActive} active batches during this period, so the average reflects a mix of conditions.` : 'All detections were part of a single active batch, so the average reflects consistent conditions.'} ` +
+      `For next week, focus on identifying the cause of below-average results — particularly in any underperforming batch — and maintain your current detection frequency to support reliable trend analysis.`;
   }
 
   const doc = {
