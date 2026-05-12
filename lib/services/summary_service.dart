@@ -125,6 +125,33 @@ class SummaryService {
     }
   }
 
+  /// Force-regenerate the most recent summary using its existing weekStart/weekEnd.
+  /// Returns the new SummaryModel on success, or null if no prior summary exists
+  /// or regeneration failed. Does NOT shift the regular weekly schedule.
+  Future<SummaryModel?> forceRegenerate() async {
+    debugPrint('[SUMMARY] forceRegenerate');
+    try {
+      final headers = await _headers();
+      final response = await http
+          .post(Uri.parse('$_baseUrl/summaries/force-regenerate'), headers: headers)
+          .timeout(const Duration(seconds: 45));
+
+      debugPrint('[SUMMARY] POST /force-regenerate → status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        // Endpoint returns either the new summary doc directly, or
+        // { ran: true, regenerated: false, reason: ... } when no reports remain.
+        if (data['regenerated'] == false) return null;
+        return SummaryModel.fromJson(data);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('[SUMMARY] forceRegenerate error: $e');
+      return null;
+    }
+  }
+
   Future<bool> markRead(String summaryId) async {
     debugPrint('[SUMMARY] markRead — id: $summaryId');
     try {

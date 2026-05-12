@@ -66,6 +66,12 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
     );
     if (confirmed != true || !mounted) return;
 
+    // Capture the moment the user clicked regenerate. The new rec must have
+    // generatedAt AFTER this — ID comparison alone fails because once today's
+    // doc is deleted, /latest returns yesterday's surviving doc (different ID,
+    // but it's NOT the freshly regenerated one).
+    final regenerateClickedAt = DateTime.now();
+
     setState(() => _isRegenerating = true);
     final ok = await _trendService.forceRegenerate();
     if (!mounted) return;
@@ -83,13 +89,12 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
       return;
     }
 
-    // Poll up to ~30s for the new doc (Gemini call typically 3-15s)
-    final originalId = _recommendations?.id;
+    // Poll up to ~30s for the truly new doc (Gemini call typically 3-15s)
     for (int i = 0; i < 15; i++) {
       await Future.delayed(const Duration(seconds: 2));
       if (!mounted) return;
       final rec = await _service.getLatestRecommendations();
-      if (rec != null && rec.id != originalId) {
+      if (rec != null && rec.generatedAt.isAfter(regenerateClickedAt)) {
         setState(() {
           _recommendations = rec;
           _isRegenerating = false;

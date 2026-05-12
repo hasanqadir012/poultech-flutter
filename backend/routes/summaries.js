@@ -95,6 +95,59 @@ router.get('/', async (req, res) => {
   }
 });
 
+// POST /summaries/force-regenerate — DEV/UTILITY route.
+// Re-runs Gemini on the most recent summary's existing weekStart/weekEnd so
+// users can preview new prompt/AI changes without waiting for the next
+// summary day. Critically:
+//   • Uses the EXISTING week boundaries (never invents a new week)
+//   • Does NOT shift the regular schedule — the next scheduled summary still
+//     fires on the user's configured summary day for the new week
+//   • Only operates on the latest summary doc; older summaries are untouched
+router.post('/force-regenerate', async (req, res) => {
+  try {
+    const latest = await db
+      .collection('summaries')
+      .findOne({ userId: req.userId }, { sort: { weekStart: -1 } });
+
+    if (!latest) {
+      return res
+        .status(404)
+        .json({ error: 'No existing summary to regenerate. Run on your summary day first.' });
+    }
+
+    const { weekStart, weekEnd, _id: oldId } = latest;
+
+    // Remove only this specific summary — preserves any older history
+    await db.collection('summaries').deleteOne({ _id: oldId });
+
+    console.log(
+      `[SUMMARY] force-regenerate — userId: ${req.userId}, ` +
+      `cleared summary ${oldId} for ${new Date(weekStart).toISOString().slice(0, 10)} → ` +
+      `${new Date(weekEnd).toISOString().slice(0, 10)}`,
+    );
+
+    // Regenerate using the SAME date range — same data window, fresh AI prose
+    const summary = await generateWeeklySummary(req.userId, weekStart, weekEnd, db);
+
+    if (!summary) {
+      // Reports might have been deleted; nothing to regenerate. The week is now
+      // "empty" — the next scheduled summary day will create the next week's doc.
+      return res.json({
+        ran: true,
+        forced: true,
+        regenerated: false,
+        reason: 'no_reports_in_period',
+      });
+    }
+
+    console.log(`[SUMMARY] force-regenerate complete — userId: ${req.userId}, new id: ${summary._id}`);
+    res.status(200).json(summary);
+  } catch (err) {
+    console.error(`[SUMMARY] force-regenerate error: ${err.message}`);
+    res.status(500).json({ error: 'Failed to force regenerate summary.' });
+  }
+});
+
 // PATCH /summaries/:id/read — mark as read
 router.patch('/:id/read', async (req, res) => {
   try {

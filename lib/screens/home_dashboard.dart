@@ -1017,6 +1017,16 @@ class _HomeDashboardState extends State<HomeDashboard>
                 await _summaryService.markRead(s.id);
                 if (mounted) setState(() => _summaryDismissed = true);
               },
+        // Sample summaries can't be regenerated — they aren't in the DB.
+        onRegenerate: isSample
+            ? null
+            : () async {
+                final regenerated = await _summaryService.forceRegenerate();
+                if (regenerated != null && mounted) {
+                  setState(() => _latestSummary = regenerated);
+                }
+                return regenerated;
+              },
       ),
     );
   }
@@ -1244,20 +1254,93 @@ class _HomeDashboardState extends State<HomeDashboard>
 
 // ── Weekly Summary Bottom Sheet ───────────────────────────────────────────────
 
-class _SummaryBottomSheet extends StatelessWidget {
+class _SummaryBottomSheet extends StatefulWidget {
   final SummaryModel summary;
   final bool isSample;
   final VoidCallback? onDismiss;
+  // Returns the freshly regenerated summary (or null on failure / no data).
+  // Parent is responsible for updating its own state if needed.
+  final Future<SummaryModel?> Function()? onRegenerate;
 
   const _SummaryBottomSheet({
     required this.summary,
     this.isSample = false,
     this.onDismiss,
+    this.onRegenerate,
   });
 
   @override
+  State<_SummaryBottomSheet> createState() => _SummaryBottomSheetState();
+}
+
+class _SummaryBottomSheetState extends State<_SummaryBottomSheet> {
+  late SummaryModel _summary;
+  bool _isRegenerating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _summary = widget.summary;
+  }
+
+  Future<void> _handleRegenerate() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Regenerate Summary?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'This will replace the AI review for ${_summary.formattedWeekRange} '
+          'with a fresh one for the same week. The week dates and your '
+          'next scheduled summary day are not affected.',
+          style: const TextStyle(color: Color(0xFF94A3B8)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: const Text('Regenerate', style: TextStyle(color: Color(0xFF3B82F6))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isRegenerating = true);
+    final newSummary = await widget.onRegenerate?.call();
+    if (!mounted) return;
+
+    if (newSummary != null) {
+      setState(() {
+        _summary = newSummary;
+        _isRegenerating = false;
+      });
+    } else {
+      setState(() => _isRegenerating = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Regeneration failed. Check the backend logs.'),
+          backgroundColor: const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final s = summary;
+    final s = _summary;
+    final isSample = widget.isSample;
+    final onDismiss = widget.onDismiss;
+    final canRegenerate = !isSample && widget.onRegenerate != null;
     final avgColor = s.averageFertilityRate >= 0.65
         ? const Color(0xFF22C55E)
         : s.averageFertilityRate >= 0.50
@@ -1335,6 +1418,33 @@ class _SummaryBottomSheet extends StatelessWidget {
                       ],
                     ),
                   ),
+                  if (canRegenerate) ...[
+                    GestureDetector(
+                      onTap: _isRegenerating ? null : _handleRegenerate,
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF334155),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: _isRegenerating
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Color(0xFF3B82F6),
+                                ),
+                              )
+                            : const Icon(
+                                Icons.refresh_rounded,
+                                color: Color(0xFF94A3B8),
+                                size: 18,
+                              ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   GestureDetector(
                     onTap: () {
                       Navigator.pop(context);
