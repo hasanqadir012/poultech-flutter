@@ -1,5 +1,7 @@
 'use strict';
 
+const { sendNotification } = require('./notification_service');
+
 const GEMINI_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
@@ -71,7 +73,9 @@ function fmtDate(d) {
 
 // Generates and saves a weekly summary for the given date range.
 // Returns null (no DB write) when the period has zero reports.
-async function generateWeeklySummary(userId, weekStart, weekEnd, db) {
+// @param {object} options
+//   - silent (bool): skip the FCM notification (used by force-regenerate)
+async function generateWeeklySummary(userId, weekStart, weekEnd, db, { silent = false } = {}) {
   const reports = await db
     .collection('reports')
     .find({ userId, createdAt: { $gte: weekStart, $lte: weekEnd } })
@@ -207,6 +211,21 @@ async function generateWeeklySummary(userId, weekStart, weekEnd, db) {
     `[SUMMARY] Generated — userId: ${userId}, period: ${weekStartFmt}–${weekEndFmt}, ` +
     `reports: ${reportCount}, id: ${result.insertedId}`,
   );
+
+  // Notify the user that the new weekly summary is ready (skip on force-regen).
+  // Body highlights the best batch when one is identifiable — makes the
+  // notification feel personalized instead of "your summary is ready" generic.
+  if (!silent) {
+    const bestBatchSentence = bestBatchLabel
+      ? `Best detection: ${highPct}% on ${bestBatchLabel}.`
+      : `Average ${avgPct}% across ${reportCount} detection${reportCount === 1 ? '' : 's'}.`;
+    await sendNotification(userId, db, {
+      title: 'Weekly Summary Ready',
+      body: `${weekStartFmt} – ${weekEndFmt}: ${bestBatchSentence} Tap to view.`,
+      data: { type: 'summary', screen: 'home' },
+    });
+  }
+
   return { ...doc, _id: result.insertedId };
 }
 

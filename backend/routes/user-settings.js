@@ -53,4 +53,28 @@ router.post('/', async (req, res) => {
   }
 });
 
+// POST /user-settings/fcm-token — register or update this user's FCM device
+// token. Called by the Flutter app on first launch and whenever the token
+// rotates (which can happen quietly in the background).
+router.post('/fcm-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (typeof token !== 'string' || token.length < 10) {
+      return res.status(400).json({ error: 'token (non-empty string) is required.' });
+    }
+
+    await db.collection('user_settings').updateOne(
+      { _id: req.userId },
+      { $set: { fcmToken: token, fcmTokenUpdatedAt: new Date() } },
+      { upsert: true },
+    );
+
+    console.log(`[USER_SETTINGS] FCM token saved — userId: ${req.userId}, tokenLength: ${token.length}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(`[USER_SETTINGS] fcm-token POST error: ${err.message}`);
+    res.status(500).json({ error: 'Failed to save FCM token.' });
+  }
+});
+
 module.exports = { router, initDb };

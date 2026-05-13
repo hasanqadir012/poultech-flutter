@@ -9,6 +9,7 @@ import 'providers/auth_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/home_dashboard.dart';
 import 'screens/login_screen.dart';
+import 'services/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,6 +35,9 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Poultech',
       debugShowCheckedModeBanner: false,
+      // navigatorKey lets NotificationService push routes from outside any
+      // widget context (e.g. on a notification tap while the app was killed).
+      navigatorKey: NotificationService.navigatorKey,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
@@ -55,6 +59,10 @@ class AuthGate extends StatelessWidget {
           return const SplashScreen();
         }
         if (snapshot.hasData && snapshot.data != null) {
+          // Fire-and-forget: register the device for push notifications now
+          // that the user is signed in. Idempotent — safe even if user
+          // signs out and back in repeatedly.
+          NotificationService.instance.initialize();
           return const HomeDashboard();
         }
         return const LoginScreen();

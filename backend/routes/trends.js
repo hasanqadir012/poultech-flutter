@@ -135,7 +135,9 @@ router.post('/force-regenerate', async (req, res) => {
       cleared: { trends: trendsDeleted.deletedCount, recommendations: recsDeleted.deletedCount },
     });
 
-    runDailyAnalysis(req.userId, db).catch((err) => {
+    // silent: true — user is right there tapping refresh; don't push them a
+    // notification for an action they just initiated.
+    runDailyAnalysis(req.userId, db, { silent: true }).catch((err) => {
       console.error(`[TRENDS] force-regenerate run failed — userId: ${req.userId}: ${err.message}`);
     });
   } catch (err) {

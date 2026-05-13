@@ -4,12 +4,29 @@ const { TREND_DAILY_STATS_WINDOW, RECS_RECENT_REPORTS } = require('../config');
 const { getPktNow, getPktMidnightAsUtc, aggregateTodayStats, backfillMissedDays } = require('./daily_stats_service');
 const { generateTrendFromDailyStats } = require('./trend_service');
 const { generateRecommendations } = require('./recommendation_service');
+const { sendNotification } = require('./notification_service');
+
+// Convert a trend direction enum to a human-readable label for notifications
+function prettifyTrend(direction) {
+  const map = {
+    strong_improvement: 'Strong Improvement',
+    improving: 'Improving',
+    stable: 'Stable',
+    declining: 'Declining',
+    strong_decline: 'Strong Decline',
+    insufficient_data: 'Insufficient Data',
+  };
+  return map[direction] || direction || 'Updated';
+}
 
 // Main daily analysis orchestrator.
 // Aggregates today's detections, generates trend and recommendations.
 // Idempotent: skips if trend already generated during today's PKT day.
-async function runDailyAnalysis(userId, db) {
-  console.log(`[DAILY_ANALYSIS] Starting — userId: ${userId}`);
+//
+// @param {boolean} silent — when true, skip user-facing FCM notifications.
+//   Used by force-regenerate routes since the user is actively watching.
+async function runDailyAnalysis(userId, db, { silent = false } = {}) {
+  console.log(`[DAILY_ANALYSIS] Starting — userId: ${userId}, silent: ${silent}`);
 
   // Guard: if a trend was already generated during today's PKT day, skip.
   // Prevents duplicates when multiple requests slip through shouldRunAnalysis concurrently.
@@ -52,6 +69,16 @@ async function runDailyAnalysis(userId, db) {
     console.error(`[DAILY_ANALYSIS] Trend generation failed — userId: ${userId}: ${err.message}`);
   }
 
+  // 3a. Notify the user about the new trend (skip if force-regen or insufficient)
+  if (trend && !silent && trend.trend !== 'insufficient_data') {
+    const avgPct = (trend.averageFertilityRate * 100).toFixed(1);
+    await sendNotification(userId, db, {
+      title: "Today's Trend Ready",
+      body: `${prettifyTrend(trend.trend)} at ${avgPct}% average over ${trend.windowDays} day${trend.windowDays === 1 ? '' : 's'}. Tap to view the chart.`,
+      data: { type: 'trend', screen: 'trends' },
+    });
+  }
+
   // 4. Generate recommendations using recent individual reports as context
   //    (recommendation_service expects individual report documents for its prompt)
   if (trend) {
@@ -62,7 +89,19 @@ async function runDailyAnalysis(userId, db) {
         .sort({ createdAt: -1 })
         .limit(RECS_RECENT_REPORTS)
         .toArray();
-      await generateRecommendations(userId, trend, recentReports, db);
+      const recsDoc = await generateRecommendations(userId, trend, recentReports, db);
+
+      // 4a. Notify after recommendations save (skip if force-regen)
+      if (recsDoc && !silent) {
+        const count = (recsDoc.recommendations || []).length;
+        if (count > 0) {
+          await sendNotification(userId, db, {
+            title: `${count} New Recommendation${count === 1 ? '' : 's'}`,
+            body: 'Fresh AI suggestions based on today\'s data. Tap to view.',
+            data: { type: 'recommendations', screen: 'recommendations' },
+          });
+        }
+      }
     } catch (err) {
       console.error(`[DAILY_ANALYSIS] Recommendations failed — userId: ${userId}: ${err.message}`);
     }

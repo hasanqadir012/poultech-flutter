@@ -126,8 +126,10 @@ router.post('/force-regenerate', async (req, res) => {
       `${new Date(weekEnd).toISOString().slice(0, 10)}`,
     );
 
-    // Regenerate using the SAME date range — same data window, fresh AI prose
-    const summary = await generateWeeklySummary(req.userId, weekStart, weekEnd, db);
+    // Regenerate using the SAME date range — same data window, fresh AI prose.
+    // silent: true — user just tapped "Regenerate"; no need to push them a
+    // notification for an action they're actively watching.
+    const summary = await generateWeeklySummary(req.userId, weekStart, weekEnd, db, { silent: true });
 
     if (!summary) {
       // Reports might have been deleted; nothing to regenerate. The week is now
