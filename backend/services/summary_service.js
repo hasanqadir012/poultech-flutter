@@ -12,8 +12,14 @@ async function callGemini(prompt) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      // Bumped from 500 → 1000 to accommodate the richer 9-12 sentence review
-      generationConfig: { maxOutputTokens: 1000, temperature: 0.4 },
+      generationConfig: {
+        maxOutputTokens: 1200,
+        temperature: 0.4,
+        // Disable Gemini 2.5 Flash's internal "thinking" — it silently eats
+        // tokens from maxOutputTokens, leaving the visible prose truncated
+        // mid-sentence. Summaries are direct prose, no reasoning needed.
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     }),
   });
 
@@ -23,7 +29,12 @@ async function callGemini(prompt) {
   }
 
   const data = await response.json();
-  return data.candidates[0].content.parts[0].text.trim();
+  const candidate = data.candidates[0];
+  const finishReason = candidate.finishReason;
+  if (finishReason && finishReason !== 'STOP') {
+    console.warn(`[SUMMARY] WARNING: finishReason=${finishReason} — response may be truncated`);
+  }
+  return candidate.content.parts[0].text.trim();
 }
 
 // Group reports by batch label and compute per-batch fertility averages.

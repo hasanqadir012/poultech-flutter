@@ -23,7 +23,14 @@ async function callGemini(prompt) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 200, temperature: 0.3 },
+      generationConfig: {
+        maxOutputTokens: 400,
+        temperature: 0.3,
+        // Disable Gemini 2.5 Flash's "thinking" — it silently eats tokens from
+        // maxOutputTokens, causing the trend summary to render mid-sentence
+        // (e.g. "Poultry fertility has shown a"). Direct prose only.
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     }),
   });
 
@@ -33,7 +40,12 @@ async function callGemini(prompt) {
   }
 
   const data = await response.json();
-  return data.candidates[0].content.parts[0].text.trim();
+  const candidate = data.candidates[0];
+  const finishReason = candidate.finishReason;
+  if (finishReason && finishReason !== 'STOP') {
+    console.warn(`[TREND] WARNING: finishReason=${finishReason} — response may be truncated`);
+  }
+  return candidate.content.parts[0].text.trim();
 }
 
 // Generates a trend document from an array of daily_stats documents.

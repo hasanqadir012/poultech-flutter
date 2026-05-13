@@ -10,7 +10,14 @@ async function callGemini(prompt, { jsonMode = false } = {}) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('Missing GEMINI_API_KEY in environment');
 
-  const generationConfig = { maxOutputTokens: 900, temperature: 0.45 };
+  const generationConfig = {
+    maxOutputTokens: 1200,
+    temperature: 0.45,
+    // Disable Gemini 2.5 Flash's internal "thinking" — it silently eats
+    // tokens from maxOutputTokens, leaving the JSON truncated mid-object
+    // (which then fails JSON.parse and forces the fallback).
+    thinkingConfig: { thinkingBudget: 0 },
+  };
   if (jsonMode) generationConfig.responseMimeType = 'application/json';
 
   const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
@@ -28,7 +35,12 @@ async function callGemini(prompt, { jsonMode = false } = {}) {
   }
 
   const data = await response.json();
-  return data.candidates[0].content.parts[0].text.trim();
+  const candidate = data.candidates[0];
+  const finishReason = candidate.finishReason;
+  if (finishReason && finishReason !== 'STOP') {
+    console.warn(`[RECOMMEND] WARNING: finishReason=${finishReason} — response may be truncated`);
+  }
+  return candidate.content.parts[0].text.trim();
 }
 
 function formatReportsForPrompt(reports) {
