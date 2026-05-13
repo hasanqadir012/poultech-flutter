@@ -742,9 +742,11 @@ class _HomeDashboardState extends State<HomeDashboard>
   // ── Trend Card ────────────────────────────────────────────────────────────
 
   Widget _buildTrendCard() {
-    if (_latestTrend == null || _latestTrend!.hasInsufficientData) {
-      // Even with insufficient trend data, let users open the chart screen
-      // — they can still see today's live dot and any single-day data point.
+    final trend = _latestTrend;
+
+    // Case 1: No trend at all — user has zero detections (or daily_stats failed).
+    // Show a generic "get started" placeholder that's still tappable.
+    if (trend == null) {
       return GestureDetector(
         onTap: () => _navigateTo(const TrendsScreen()),
         child: Container(
@@ -773,14 +775,88 @@ class _HomeDashboardState extends State<HomeDashboard>
                     SizedBox(height: 2),
                     Text(
                       'Detect on 2+ separate days to see trend direction. Tap to view today\'s live chart.',
-                      style:
-                          TextStyle(color: Color(0xFF64748B), fontSize: 12, height: 1.4),
+                      style: TextStyle(color: Color(0xFF64748B), fontSize: 12, height: 1.4),
                     ),
                   ],
                 ),
               ),
               SizedBox(width: 8),
               Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 20),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Case 2: Day-1 baseline — we have ONE day of data. Trend direction is
+    // mathematically impossible (need >=2 points for a slope), but we can
+    // still show today's average + count so the card isn't blank.
+    if (trend.hasInsufficientData) {
+      final accent = const Color(0xFF3B82F6);
+      return GestureDetector(
+        onTap: () => _navigateTo(const TrendsScreen()),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: accent.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.timeline_outlined, color: accent, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'BUILDING TREND · DAY 1 OF 2',
+                      style: TextStyle(
+                        color: accent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(
+                          trend.averagePercent,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'avg · ${trend.reportCount} detection${trend.reportCount == 1 ? '' : 's'}',
+                          style: const TextStyle(
+                            color: Color(0xFF94A3B8),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Detect again tomorrow to unlock trend direction.',
+                      style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 20),
             ],
           ),
         ),
