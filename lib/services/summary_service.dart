@@ -24,31 +24,41 @@ class SummaryService {
     }
   }
 
-  /// Checks if today is the configured summary day. If so, fires a
-  /// non-blocking POST to generate (or return existing) weekly summary.
+  /// Fires a non-blocking POST to generate (or return existing) weekly summary
+  /// for the most recently completed summary period based on the user's chosen day.
+  /// Catches up automatically if the app was not opened on the configured day.
   /// Should be called from dashboard initState as fire-and-forget.
   Future<void> checkAndGenerateWeeklySummary() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final summaryDay = prefs.getInt('summary_day_of_week') ?? 1; // 1 = Monday
 
-      if (DateTime.now().weekday != summaryDay) return;
-
       final now = DateTime.now();
-      // Summarized period = the 7 days that just ended (yesterday back to 8 days ago)
       final todayMidnight = DateTime(now.year, now.month, now.day);
-      final weekStart = todayMidnight.subtract(const Duration(days: 7));
+
+      // Find the most recent past occurrence of the user's chosen summary day.
+      // daysSince = 0 when today IS the summary day; otherwise days elapsed since last one.
+      final daysSince = (now.weekday - summaryDay + 7) % 7;
+
+      // If today is the summary day (daysSince == 0) use today; otherwise use last occurrence.
+      // Skip if the summary day has never occurred yet (first day of the week cycle hasn't passed).
+      final lastSummaryDay = daysSince == 0 && now.weekday == summaryDay
+          ? todayMidnight
+          : todayMidnight.subtract(Duration(days: daysSince == 0 ? 7 : daysSince));
+
+      // Summarized period = the 7 days ending the day before the last summary day.
+      final weekStart = lastSummaryDay.subtract(const Duration(days: 7));
       final weekEnd = DateTime(
-        todayMidnight.year,
-        todayMidnight.month,
-        todayMidnight.day - 1,
+        lastSummaryDay.year,
+        lastSummaryDay.month,
+        lastSummaryDay.day - 1,
         23,
         59,
         59,
       );
 
       debugPrint(
-        '[SUMMARY] Summary day matched — generating for '
+        '[SUMMARY] Generating for '
         '${weekStart.toIso8601String()} to ${weekEnd.toIso8601String()}',
       );
 
@@ -112,6 +122,33 @@ class SummaryService {
     } catch (e) {
       debugPrint('[SUMMARY] getAllSummaries error: $e');
       return [];
+    }
+  }
+
+  /// Force-regenerate the most recent summary using its existing weekStart/weekEnd.
+  /// Returns the new SummaryModel on success, or null if no prior summary exists
+  /// or regeneration failed. Does NOT shift the regular weekly schedule.
+  Future<SummaryModel?> forceRegenerate() async {
+    debugPrint('[SUMMARY] forceRegenerate');
+    try {
+      final headers = await _headers();
+      final response = await http
+          .post(Uri.parse('$_baseUrl/summaries/force-regenerate'), headers: headers)
+          .timeout(const Duration(seconds: 45));
+
+      debugPrint('[SUMMARY] POST /force-regenerate → status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        // Endpoint returns either the new summary doc directly, or
+        // { ran: true, regenerated: false, reason: ... } when no reports remain.
+        if (data['regenerated'] == false) return null;
+        return SummaryModel.fromJson(data);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('[SUMMARY] forceRegenerate error: $e');
+      return null;
     }
   }
 

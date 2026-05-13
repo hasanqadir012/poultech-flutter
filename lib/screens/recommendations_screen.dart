@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/recommendation_model.dart';
 import '../services/recommendation_service.dart';
+import '../services/trend_service.dart';
 
 class RecommendationsScreen extends StatefulWidget {
   const RecommendationsScreen({super.key});
@@ -12,8 +13,10 @@ class RecommendationsScreen extends StatefulWidget {
 
 class _RecommendationsScreenState extends State<RecommendationsScreen> {
   final RecommendationService _service = RecommendationService();
+  final TrendService _trendService = TrendService();
 
   bool _isLoading = true;
+  bool _isRegenerating = false;
   RecommendationsModel? _recommendations;
 
   @override
@@ -33,6 +36,86 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
     }
   }
 
+  /// Clear today's docs and regenerate trend + recommendations from scratch.
+  /// Polls for the new recommendation since the backend writes it async.
+  Future<void> _regenerate() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Regenerate Recommendations?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'This will clear today\'s trend and recommendations, then regenerate them with the latest AI model.',
+          style: TextStyle(color: Color(0xFF94A3B8)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: const Text('Regenerate', style: TextStyle(color: Color(0xFF3B82F6))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    // Capture the moment the user clicked regenerate. The new rec must have
+    // generatedAt AFTER this — ID comparison alone fails because once today's
+    // doc is deleted, /latest returns yesterday's surviving doc (different ID,
+    // but it's NOT the freshly regenerated one).
+    final regenerateClickedAt = DateTime.now();
+
+    setState(() => _isRegenerating = true);
+    final ok = await _trendService.forceRegenerate();
+    if (!mounted) return;
+
+    if (!ok) {
+      setState(() => _isRegenerating = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Failed to trigger regeneration. Check the backend.'),
+          backgroundColor: const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
+    // Poll up to ~30s for the truly new doc (Gemini call typically 3-15s)
+    for (int i = 0; i < 15; i++) {
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      final rec = await _service.getLatestRecommendations();
+      if (rec != null && rec.generatedAt.isAfter(regenerateClickedAt)) {
+        setState(() {
+          _recommendations = rec;
+          _isRegenerating = false;
+        });
+        return;
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isRegenerating = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Regenerating in background — pull to refresh in a moment.'),
+          backgroundColor: const Color(0xFF1E293B),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -45,6 +128,22 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
           'Recommendations',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Regenerate now',
+            onPressed: _isLoading || _isRegenerating ? null : _regenerate,
+            icon: _isRegenerating
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFF3B82F6),
+                    ),
+                  )
+                : const Icon(Icons.refresh_rounded),
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(

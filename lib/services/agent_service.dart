@@ -83,8 +83,12 @@ class AgentService {
       },
       'contents': contents,
       'generationConfig': {
-        'maxOutputTokens': 600,
+        'maxOutputTokens': 800,
         'temperature': 0.4,
+        // Disable Gemini 2.5 Flash's internal "thinking" — it silently eats
+        // tokens from maxOutputTokens, leaving the visible answer truncated
+        // mid-sentence. For poultry advice we want direct prose, not reasoning.
+        'thinkingConfig': {'thinkingBudget': 0},
       },
     };
 
@@ -104,9 +108,13 @@ class AgentService {
     }
 
     final jsonResponse = jsonDecode(response.body) as Map<String, dynamic>;
-    final text =
-        jsonResponse['candidates'][0]['content']['parts'][0]['text'] as String;
-    debugPrint('[AGENT] Response length: ${text.length} chars');
+    final candidate = jsonResponse['candidates'][0] as Map<String, dynamic>;
+    final finishReason = candidate['finishReason'];
+    final text = candidate['content']['parts'][0]['text'] as String;
+    if (finishReason != null && finishReason != 'STOP') {
+      debugPrint('[AGENT] WARNING: finishReason=$finishReason — response may be truncated');
+    }
+    debugPrint('[AGENT] Response length: ${text.length} chars, finishReason: $finishReason');
     return text.trim();
   }
 

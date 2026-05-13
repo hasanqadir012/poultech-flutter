@@ -72,9 +72,10 @@ class SummaryModel {
     return '$start – $end';
   }
 
-  // True if this summary covers the current or most recent period (within last 7 days)
+  // True if this summary was generated within the past 7 days.
+  // Uses generatedAt (a precise instant) instead of weekStart (midnight) to avoid
+  // the time-of-day mismatch that made this always false on the generation day itself.
   bool get isCurrentPeriod {
-    final sevenDaysAgo = DateTime.now().subtract(const Duration(days: 7));
-    return weekStart.isAfter(sevenDaysAgo);
+    return DateTime.now().difference(generatedAt).inDays < 7;
   }
 }

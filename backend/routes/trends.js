@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { getTodayLive, shouldRunAnalysis } = require('../services/daily_stats_service');
+const { getTodayLive, shouldRunAnalysis, backfillMissedDays } = require('../services/daily_stats_service');
 const { runDailyAnalysis } = require('../services/daily_analysis_service');
 
 let db;
@@ -11,22 +11,20 @@ function initDb(database) {
   db = database;
 }
 
-// GET /trends/latest?days=N — most recent trend for this user with the given window
+// GET /trends/latest — most recent trend for this user (windowDays filter removed:
+// stored windowDays = actual data length, not user's chart selector, so filtering
+// by it caused new users to never see trends)
 router.get('/latest', async (req, res) => {
   try {
-    const windowDays = parseInt(req.query.days ?? '14', 10);
-    const validWindows = [7, 14, 30];
-    const days = validWindows.includes(windowDays) ? windowDays : 14;
-
     const trend = await db
       .collection('trends')
       .findOne(
-        { userId: req.userId, windowDays: days },
+        { userId: req.userId },
         { sort: { generatedAt: -1 } },
       );
 
     console.log(
-      `[TRENDS] GET /latest — userId: ${req.userId}, days: ${days}, found: ${!!trend}`,
+      `[TRENDS] GET /latest — userId: ${req.userId}, found: ${!!trend}, windowDays: ${trend?.windowDays ?? 'n/a'}`,
     );
     res.json(trend ?? null);
   } catch (err) {
@@ -35,18 +33,27 @@ router.get('/latest', async (req, res) => {
   }
 });
 
-// GET /trends — full trend history for this user, newest first
+const PKT_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+// GET /trends — full trend history for this user, newest first (one per PKT day)
 router.get('/', async (req, res) => {
   try {
     const trends = await db
       .collection('trends')
       .find({ userId: req.userId })
       .sort({ generatedAt: -1 })
-      .limit(20)
+      .limit(60)
       .toArray();
 
-    console.log(`[TRENDS] GET / — userId: ${req.userId}, count: ${trends.length}`);
-    res.json(trends);
+    // Deduplicate: keep the first (most recent) trend per PKT day
+    const seen = new Set();
+    const deduped = trends.filter((t) => {
+      const pktDate = new Date(t.generatedAt.getTime() + PKT_OFFSET_MS).toISOString().slice(0, 10);
+      return seen.has(pktDate) ? false : (seen.add(pktDate), true);
+    }).slice(0, 20);
+
+    console.log(`[TRENDS] GET / — userId: ${req.userId}, count: ${deduped.length}`);
+    res.json(deduped);
   } catch (err) {
     console.error(`[TRENDS] GET / error: ${err.message}`);
     res.status(500).json({ error: 'Failed to fetch trends.' });
@@ -69,6 +76,12 @@ router.get('/today', async (req, res) => {
 // Returns { ran: true } if analysis ran, { ran: false, reason } if skipped
 router.post('/run-daily-analysis', async (req, res) => {
   try {
+    // Always backfill missed past days on app open — recovers orphaned reports
+    // even when shouldRunAnalysis would return false (e.g. before scheduled time).
+    await backfillMissedDays(req.userId, db, 7).catch((err) =>
+      console.error(`[TRENDS] backfill failed — userId: ${req.userId}: ${err.message}`),
+    );
+
     const should = await shouldRunAnalysis(req.userId, db);
     if (!should) {
       const nowPkt = new Date(Date.now() + 5 * 60 * 60 * 1000);
@@ -87,6 +100,47 @@ router.post('/run-daily-analysis', async (req, res) => {
   } catch (err) {
     console.error(`[TRENDS] run-daily-analysis error: ${err.message}`);
     res.status(500).json({ error: 'Failed to trigger analysis.' });
+  }
+});
+
+// POST /trends/force-regenerate — DEV/UTILITY route.
+// Clears today's trend and recommendation docs, then re-runs the analysis.
+// Bypasses the same-day idempotency guard so you can iterate on prompts/code
+// without having to wait until tomorrow.
+router.post('/force-regenerate', async (req, res) => {
+  try {
+    const PKT_OFFSET_MS = 5 * 60 * 60 * 1000;
+    const nowPkt = new Date(Date.now() + PKT_OFFSET_MS);
+    const todayPktMidnightUtc = new Date(
+      Date.UTC(nowPkt.getUTCFullYear(), nowPkt.getUTCMonth(), nowPkt.getUTCDate()) - PKT_OFFSET_MS,
+    );
+
+    const trendsDeleted = await db.collection('trends').deleteMany({
+      userId: req.userId,
+      generatedAt: { $gte: todayPktMidnightUtc },
+    });
+    const recsDeleted = await db.collection('recommendations').deleteMany({
+      userId: req.userId,
+      generatedAt: { $gte: todayPktMidnightUtc },
+    });
+
+    console.log(
+      `[TRENDS] force-regenerate — userId: ${req.userId}, ` +
+      `cleared trends: ${trendsDeleted.deletedCount}, recs: ${recsDeleted.deletedCount}`,
+    );
+
+    res.json({
+      ran: true,
+      forced: true,
+      cleared: { trends: trendsDeleted.deletedCount, recommendations: recsDeleted.deletedCount },
+    });
+
+    runDailyAnalysis(req.userId, db).catch((err) => {
+      console.error(`[TRENDS] force-regenerate run failed — userId: ${req.userId}: ${err.message}`);
+    });
+  } catch (err) {
+    console.error(`[TRENDS] force-regenerate error: ${err.message}`);
+    res.status(500).json({ error: 'Failed to force regenerate.' });
   }
 });
 
