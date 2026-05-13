@@ -743,39 +743,46 @@ class _HomeDashboardState extends State<HomeDashboard>
 
   Widget _buildTrendCard() {
     if (_latestTrend == null || _latestTrend!.hasInsufficientData) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E293B),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF334155)),
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.show_chart, color: Color(0xFF64748B), size: 20),
-            SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Trend Analysis',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
+      // Even with insufficient trend data, let users open the chart screen
+      // — they can still see today's live dot and any single-day data point.
+      return GestureDetector(
+        onTap: () => _navigateTo(const TrendsScreen()),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF334155)),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.show_chart, color: Color(0xFF64748B), size: 20),
+              SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Trend Analysis',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  SizedBox(height: 2),
-                  Text(
-                    'Run 2+ detections to see trends',
-                    style:
-                        TextStyle(color: Color(0xFF64748B), fontSize: 12),
-                  ),
-                ],
+                    SizedBox(height: 2),
+                    Text(
+                      'Detect on 2+ separate days to see trend direction. Tap to view today\'s live chart.',
+                      style:
+                          TextStyle(color: Color(0xFF64748B), fontSize: 12, height: 1.4),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              SizedBox(width: 8),
+              Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 20),
+            ],
+          ),
         ),
       );
     }
