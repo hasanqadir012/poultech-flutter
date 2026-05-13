@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/summary_service.dart';
 import '../services/user_settings_service.dart';
 import 'tutorial_screen.dart';
 
@@ -16,6 +17,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _summaryDayOfWeek = 1; // 1 = Monday … 7 = Sunday (DateTime.weekday)
   int _analysisHour = 21;
   int _analysisMinute = 0;
+  bool _isRegeneratingSummary = false;
 
   static const List<String> _dayLabels = [
     'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
@@ -97,6 +99,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final m = _analysisMinute.toString().padLeft(2, '0');
     final period = _analysisHour < 12 ? 'AM' : 'PM';
     return '$h:$m $period PKT';
+  }
+
+  /// Force-regenerate the latest weekly summary. Same backend endpoint used by
+  /// the refresh icon inside the summary bottom sheet — keeps the existing
+  /// weekStart/weekEnd, just refreshes the AI content. The new doc has
+  /// isRead=false so the banner reappears on the dashboard.
+  Future<void> _regenerateSummary() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Regenerate Weekly Summary?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'This will replace your most recent weekly summary with a fresh AI-written one '
+          'covering the same week. The week boundaries stay the same and your next '
+          'scheduled summary day is not affected.',
+          style: TextStyle(color: Color(0xFF94A3B8), height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: const Text(
+              'Regenerate',
+              style: TextStyle(color: Color(0xFF3B82F6), fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isRegeneratingSummary = true);
+    final newSummary = await SummaryService().forceRegenerate();
+    if (!mounted) return;
+    setState(() => _isRegeneratingSummary = false);
+
+    final messenger = ScaffoldMessenger.of(context);
+    if (newSummary != null) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Summary regenerated for ${newSummary.formattedWeekRange}. '
+            'Go to home screen to view it.',
+          ),
+          backgroundColor: const Color(0xFF22C55E),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    } else {
+      messenger.showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Could not regenerate. Either no prior summary exists yet, or the '
+            'backend is unreachable. Check your connection and try again.',
+          ),
+          backgroundColor: const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    }
   }
 
   @override
@@ -277,6 +349,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const Spacer(),
                     const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 20),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 28),
+
+            // ── Weekly Summary controls ────────────────────────────────────
+            const Text(
+              'WEEKLY SUMMARY',
+              style: TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Refresh the AI review for the current weekly summary. '
+              'Useful if you dismissed the banner or want a freshly written analysis '
+              'of the same week. Your scheduled summary day is unchanged.',
+              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, height: 1.5),
+            ),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: _isRegeneratingSummary ? null : _regenerateSummary,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF334155)),
+                ),
+                child: Row(
+                  children: [
+                    _isRegeneratingSummary
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Color(0xFF3B82F6),
+                            ),
+                          )
+                        : const Icon(
+                            Icons.refresh_rounded,
+                            color: Color(0xFF3B82F6),
+                            size: 20,
+                          ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _isRegeneratingSummary
+                            ? 'Regenerating…'
+                            : 'Regenerate Latest Weekly Summary',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    if (!_isRegeneratingSummary)
+                      const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 20),
                   ],
                 ),
               ),
