@@ -104,18 +104,18 @@ class MainActivity : FlutterActivity() {
         try {
             // Copy model from Flutter assets to a temp file
             // Flutter assets are in "flutter_assets/" directory
-            val modelFile = File(cacheDir, "best.onnx")
+            val modelFile = File(cacheDir, "egg_candling_best.onnx")
             Log.d(TAG, "Model file path: ${modelFile.absolutePath}")
-            
+
             if (!modelFile.exists()) {
                 Log.d(TAG, "Model file doesn't exist, copying from assets...")
                 var copied = false
-                
+
                 // Try different possible paths for Flutter assets
                 val possiblePaths = listOf(
-                    "flutter_assets/assets/best.onnx",
-                    "assets/best.onnx",
-                    "best.onnx"
+                    "flutter_assets/assets/egg_candling_best.onnx",
+                    "assets/egg_candling_best.onnx",
+                    "egg_candling_best.onnx"
                 )
                 
                 for (assetPath in possiblePaths) {
@@ -154,7 +154,7 @@ class MainActivity : FlutterActivity() {
 
     private fun runInference(inputArray: FloatArray): List<Float> {
         val session = ortSession ?: throw IllegalStateException("Model not loaded")
-        val inputShape = longArrayOf(1, 3, 640, 640)
+        val inputShape = longArrayOf(1, 3, 960, 960)
         
         // Anchor the ByteBuffer so GC doesn't kill it during inference!
         val byteBuffer = java.nio.ByteBuffer.allocateDirect(inputArray.size * 4)
@@ -219,7 +219,7 @@ class MainActivity : FlutterActivity() {
         val orientation = exif?.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) ?: ExifInterface.ORIENTATION_NORMAL
         
         var scale = 1
-        while (options.outWidth / scale / 2 >= 640 && options.outHeight / scale / 2 >= 640) {
+        while (options.outWidth / scale / 2 >= 960 && options.outHeight / scale / 2 >= 960) {
             scale *= 2
         }
         options.inJustDecodeBounds = false
@@ -246,34 +246,34 @@ class MainActivity : FlutterActivity() {
         val originalWidth = srcBitmap.width
         val originalHeight = srcBitmap.height
         
-        val r = Math.min(640.0 / originalWidth, 640.0 / originalHeight)
+        val r = Math.min(960.0 / originalWidth, 960.0 / originalHeight)
         val resizedW = (originalWidth * r).toInt()
         val resizedH = (originalHeight * r).toInt()
         
-        val padLeft = (640 - resizedW) / 2
-        val padTop = (640 - resizedH) / 2
+        val padLeft = (960 - resizedW) / 2
+        val padTop = (960 - resizedH) / 2
         
         val scaledBitmap = Bitmap.createScaledBitmap(srcBitmap, resizedW, resizedH, true)
         
-        val canvasBitmap = Bitmap.createBitmap(640, 640, Bitmap.Config.ARGB_8888)
+        val canvasBitmap = Bitmap.createBitmap(960, 960, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(canvasBitmap)
         canvas.drawColor(android.graphics.Color.rgb(114, 114, 114))
         canvas.drawBitmap(scaledBitmap, padLeft.toFloat(), padTop.toFloat(), null)
         
-        val pixels = IntArray(640 * 640)
-        canvasBitmap.getPixels(pixels, 0, 640, 0, 0, 640, 640)
+        val pixels = IntArray(960 * 960)
+        canvasBitmap.getPixels(pixels, 0, 960, 0, 0, 960, 960)
         
-        val floatArray = FloatArray(3 * 640 * 640)
-        for (y in 0 until 640) {
-            for (x in 0 until 640) {
-                val pixel = pixels[y * 640 + x]
+        val floatArray = FloatArray(3 * 960 * 960)
+        for (y in 0 until 960) {
+            for (x in 0 until 960) {
+                val pixel = pixels[y * 960 + x]
                 val rVal = ((pixel shr 16) and 0xFF) / 255.0f
                 val gVal = ((pixel shr 8) and 0xFF) / 255.0f
                 val bVal = (pixel and 0xFF) / 255.0f
                 
-                floatArray[0 * 640 * 640 + y * 640 + x] = rVal
-                floatArray[1 * 640 * 640 + y * 640 + x] = gVal
-                floatArray[2 * 640 * 640 + y * 640 + x] = bVal
+                floatArray[0 * 960 * 960 + y * 960 + x] = rVal
+                floatArray[1 * 960 * 960 + y * 960 + x] = gVal
+                floatArray[2 * 960 * 960 + y * 960 + x] = bVal
             }
         }
         

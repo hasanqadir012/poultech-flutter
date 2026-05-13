@@ -8,10 +8,14 @@ import 'package:flutter/services.dart';
 import '../models/detection_models.dart';
 
 /// ONNX inference service.
-/// - Input: 1x3x640x640 float32 RGB, 0-1 normalized, letterboxed.
-/// - Output: 1x300x6 (YOLOv8 Post-NMS), indices: 0-3 (x1,y1,x2,y2), 4 (score), 5 (class_id).
+/// - Input: 1x3x960x960 float32 RGB, 0-1 normalized, letterboxed.
+/// - Output: 1x6x18900 raw YOLOv8 (channels-first): channels 0-3 (cx,cy,w,h), 4-5 (class scores).
 class ONNXService {
   static const _channel = MethodChannel('poultech/onnx');
+
+  static const int _inputSize = 960;
+  static const int _numAnchors = 18900; // 120^2 + 60^2 + 30^2 at 960px
+  static const int _numClasses = 2;
 
   // YOLOv8 Post-processing thresholds
   static const double _confThreshold = 0.30;
@@ -111,7 +115,7 @@ class ONNXService {
       throw Exception('MethodChannel "poultech/onnx" not implemented.');
     }
 
-    const int expectedSize = 1 * 300 * 6;
+    const int expectedSize = 1 * (4 + _numClasses) * _numAnchors;
     if (output.length != expectedSize) {
       debugPrint('Warning: Unexpected output length: ${output.length}. Expected $expectedSize');
     }
@@ -136,60 +140,76 @@ class ONNXService {
     required double padW,
     required double padH,
   }) {
-    const int maxDetections = 300;
-    final List<EggDetectionResult> results = [];
+    // Raw YOLOv8 output: [1, 4+numClasses, numAnchors], channels-first.
+    // Flat index for channel c, anchor n: c * numAnchors + n.
+    final List<_DetectionCandidate> candidates = [];
 
-    // YOLOv8 Post-NMS Output is [1, 300, 6]
-    // Each detection: [x1, y1, x2, y2, score, class_id]
-    for (int i = 0; i < maxDetections; i++) {
-      final int baseIdx = i * 6;
-
-      // Skip padding (detections with all zeros)
-      final double x1Raw = output[baseIdx + 0];
-      final double y1Raw = output[baseIdx + 1];
-      final double x2Raw = output[baseIdx + 2];
-      final double y2Raw = output[baseIdx + 3];
-      final double score = output[baseIdx + 4];
-      final double classIdFloat = output[baseIdx + 5];
-
-      // Skip empty detections (padding)
-      if (x1Raw == 0 && y1Raw == 0 && x2Raw == 0 && y2Raw == 0 && score == 0) {
-        continue;
+    for (int n = 0; n < _numAnchors; n++) {
+      // Find best class
+      double bestScore = 0;
+      int bestClass = 0;
+      for (int c = 0; c < _numClasses; c++) {
+        final double s = output[(4 + c) * _numAnchors + n];
+        if (s > bestScore) {
+          bestScore = s;
+          bestClass = c;
+        }
       }
+      if (bestScore < _confThreshold) continue;
 
-      // Apply confidence threshold
-      if (score < _confThreshold) continue;
+      // bbox in letterbox (960x960) pixel coordinates, cx/cy/w/h
+      final double cx = output[0 * _numAnchors + n];
+      final double cy = output[1 * _numAnchors + n];
+      final double w = output[2 * _numAnchors + n];
+      final double h = output[3 * _numAnchors + n];
 
-      final int classId = classIdFloat.round();
+      double x1 = cx - w / 2;
+      double y1 = cy - h / 2;
+      double x2 = cx + w / 2;
+      double y2 = cy + h / 2;
 
-      // Remove padding/scaling from letterbox coordinates
-      double x1 = (x1Raw - padW) / ratio;
-      double y1 = (y1Raw - padH) / ratio;
-      double x2 = (x2Raw - padW) / ratio;
-      double y2 = (y2Raw - padH) / ratio;
+      // Reverse letterbox: subtract padding, divide by ratio -> original image coords
+      x1 = (x1 - padW) / ratio;
+      y1 = (y1 - padH) / ratio;
+      x2 = (x2 - padW) / ratio;
+      y2 = (y2 - padH) / ratio;
 
-      // Convert to x, y, width, height format and clamp to image bounds
-      final double width = (x2 - x1).clamp(0, imgWidth.toDouble());
-      final double height = (y2 - y1).clamp(0, imgHeight.toDouble());
+      x1 = x1.clamp(0, imgWidth.toDouble());
+      y1 = y1.clamp(0, imgHeight.toDouble());
+      x2 = x2.clamp(0, imgWidth.toDouble());
+      y2 = y2.clamp(0, imgHeight.toDouble());
 
-      results.add(
-        EggDetectionResult(
-          BoundingBox(
-            x1.clamp(0, imgWidth.toDouble()),
-            y1.clamp(0, imgHeight.toDouble()),
-            width,
-            height,
-          ),
-          classId == 0, // fertile if class 0
-          score,
-        ),
-      );
+      final double bw = x2 - x1;
+      final double bh = y2 - y1;
+      if (bw <= 1 || bh <= 1) continue;
 
-      // Limit to max detections
-      if (results.length >= _maxDetections) break;
+      candidates.add(_DetectionCandidate(
+        score: bestScore,
+        classId: bestClass,
+        box: BoundingBox(x1, y1, bw, bh),
+      ));
     }
 
-    return results;
+    // Sort by score desc, then NMS
+    candidates.sort((a, b) => b.score.compareTo(a.score));
+
+    final List<EggDetectionResult> kept = [];
+    final List<bool> suppressed = List<bool>.filled(candidates.length, false);
+
+    for (int i = 0; i < candidates.length; i++) {
+      if (suppressed[i]) continue;
+      final ci = candidates[i];
+      kept.add(EggDetectionResult(ci.box, ci.classId == 0, ci.score));
+      if (kept.length >= _maxDetections) break;
+      for (int j = i + 1; j < candidates.length; j++) {
+        if (suppressed[j]) continue;
+        if (_calculateIOU(ci.box, candidates[j].box) > _iouThreshold) {
+          suppressed[j] = true;
+        }
+      }
+    }
+
+    return kept;
   }
 
   static double _calculateIOU(BoundingBox a, BoundingBox b) {
