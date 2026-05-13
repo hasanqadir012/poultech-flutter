@@ -157,8 +157,12 @@ class _HomeDashboardState extends State<HomeDashboard>
   bool get _shouldShowSummary {
     if (_summaryDismissed) return false;
     final s = _latestSummary;
-    if (s == null || s.isRead) return false;
-    return true; // Show regardless of age — the badge indicates fresh/current/previous
+    if (s == null) return false;
+    // Note: s.isRead is intentionally ignored. Dismiss is session-only — the
+    // banner reappears on next app open until the next week's summary
+    // naturally supersedes this one. (Old behaviour permanently hid summaries
+    // after one Dismiss tap, which was hostile UX.)
+    return true;
   }
 
   // Show sample only when no real summary has ever been generated for this user
@@ -1013,8 +1017,10 @@ class _HomeDashboardState extends State<HomeDashboard>
         isSample: isSample,
         onDismiss: isSample
             ? null
-            : () async {
-                await _summaryService.markRead(s.id);
+            : () {
+                // Session-only dismiss — DO NOT call markRead. The banner
+                // hides until app restart, after which it returns. The next
+                // week's summary will naturally replace it via /summaries/latest.
                 if (mounted) setState(() => _summaryDismissed = true);
               },
         // Sample summaries can't be regenerated — they aren't in the DB.
