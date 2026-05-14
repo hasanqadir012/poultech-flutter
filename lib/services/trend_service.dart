@@ -7,8 +7,11 @@ import 'package:http/http.dart' as http;
 import '../app_config.dart';
 import '../models/daily_stat_model.dart';
 import '../models/today_live_model.dart';
-import '../models/trend_model.dart';
 
+/// Lean trend service — only the chart-data endpoints remain.
+/// The legacy /trends/* endpoints (latest trend doc, history, run-daily-analysis,
+/// force-regenerate) are gone — diagnosis + recommendations now come from
+/// [AgentAnalysisService].
 class TrendService {
   static const String _baseUrl = AppConfig.backendBaseUrl;
 
@@ -25,65 +28,13 @@ class TrendService {
     }
   }
 
-  Future<TrendModel?> getLatestTrend({int windowDays = 14}) async {
-    debugPrint('[TREND] getLatestTrend — windowDays: $windowDays');
-    try {
-      final headers = await _headers();
-      final response = await http
-          .get(
-            Uri.parse('$_baseUrl/trends/latest?days=$windowDays'),
-            headers: headers,
-          )
-          .timeout(const Duration(seconds: 15));
-
-      debugPrint('[TREND] GET /trends/latest → status: ${response.statusCode}');
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data == null) return null;
-        return TrendModel.fromJson(data as Map<String, dynamic>);
-      }
-      return null;
-    } catch (e) {
-      debugPrint('[TREND] getLatestTrend error: $e');
-      return null;
-    }
-  }
-
-  Future<List<TrendModel>> getTrendHistory() async {
-    debugPrint('[TREND] getTrendHistory');
-    try {
-      final headers = await _headers();
-      final response = await http
-          .get(Uri.parse('$_baseUrl/trends'), headers: headers)
-          .timeout(const Duration(seconds: 15));
-
-      debugPrint('[TREND] GET /trends → status: ${response.statusCode}');
-
-      if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
-        debugPrint('[TREND] getTrendHistory — ${data.length} records');
-        return data
-            .map((j) => TrendModel.fromJson(j as Map<String, dynamic>))
-            .toList();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('[TREND] getTrendHistory error: $e');
-      return [];
-    }
-  }
-
   /// Returns today's live running average without triggering analysis.
   Future<TodayLiveModel?> getTodayLive() async {
-    debugPrint('[TREND] getTodayLive');
     try {
       final headers = await _headers();
       final response = await http
           .get(Uri.parse('$_baseUrl/trends/today'), headers: headers)
           .timeout(const Duration(seconds: 10));
-
-      debugPrint('[TREND] GET /trends/today → status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -96,52 +47,13 @@ class TrendService {
     }
   }
 
-  /// Fires POST /trends/run-daily-analysis silently.
-  /// Backend returns { ran: false } if too early or already ran — no action needed.
-  Future<void> triggerDailyAnalysis() async {
-    debugPrint('[TREND] triggerDailyAnalysis');
-    try {
-      final headers = await _headers();
-      final response = await http
-          .post(Uri.parse('$_baseUrl/trends/run-daily-analysis'), headers: headers)
-          .timeout(const Duration(seconds: 30));
-
-      debugPrint('[TREND] POST /run-daily-analysis → status: ${response.statusCode}, body: ${response.body}');
-    } catch (e) {
-      debugPrint('[TREND] triggerDailyAnalysis error: $e');
-    }
-  }
-
-  /// Force-regenerate today's trend and recommendations.
-  /// Bypasses the same-day idempotency guard by deleting today's docs first.
-  /// Returns true if the backend accepted the request. The new docs are
-  /// written async — callers should refetch after a short delay.
-  Future<bool> forceRegenerate() async {
-    debugPrint('[TREND] forceRegenerate');
-    try {
-      final headers = await _headers();
-      final response = await http
-          .post(Uri.parse('$_baseUrl/trends/force-regenerate'), headers: headers)
-          .timeout(const Duration(seconds: 30));
-
-      debugPrint('[TREND] POST /force-regenerate → status: ${response.statusCode}, body: ${response.body}');
-      return response.statusCode == 200;
-    } catch (e) {
-      debugPrint('[TREND] forceRegenerate error: $e');
-      return false;
-    }
-  }
-
   /// Returns daily aggregated stats for the chart (one entry per day, oldest first).
   Future<List<DailyStatModel>> getDailyStats({int days = 14}) async {
-    debugPrint('[TREND] getDailyStats — days: $days');
     try {
       final headers = await _headers();
       final response = await http
           .get(Uri.parse('$_baseUrl/daily-stats?days=$days'), headers: headers)
           .timeout(const Duration(seconds: 15));
-
-      debugPrint('[TREND] GET /daily-stats → status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;

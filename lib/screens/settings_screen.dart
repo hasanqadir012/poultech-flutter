@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/agent_analysis_service.dart';
 import '../services/summary_service.dart';
 import '../services/user_settings_service.dart';
 import 'tutorial_screen.dart';
@@ -18,6 +19,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _analysisHour = 21;
   int _analysisMinute = 0;
   bool _isRegeneratingSummary = false;
+  bool _isRegeneratingAgent = false;
 
   static const List<String> _dayLabels = [
     'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
@@ -92,6 +94,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // Await backend save — was fire-and-forget before, which could leave the
     // server using stale default values (21:00) while the UI showed the new time.
     await UserSettingsService().setAnalysisTime(picked.hour, picked.minute);
+  }
+
+  Future<void> _regenerateAgent() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Re-run AI Analysis?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'The AI analyst will investigate your latest hatchery data and produce a fresh '
+          'diagnosis with evidence and recommendations. This takes about 10–15 seconds.',
+          style: TextStyle(color: Color(0xFF94A3B8), height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: const Text(
+              'Run Analysis',
+              style: TextStyle(color: Color(0xFF3B82F6), fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isRegeneratingAgent = true);
+    final ok = await AgentAnalysisService().forceRegenerate();
+    if (!mounted) return;
+    setState(() => _isRegeneratingAgent = false);
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Analysis is running in the background. Check the dashboard in ~15 seconds.'
+              : 'Could not trigger analysis. Check your connection and try again.',
+        ),
+        backgroundColor: ok ? const Color(0xFF22C55E) : const Color(0xFFEF4444),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   String _formatAnalysisTime() {
@@ -322,7 +376,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Trends and recommendations are generated once daily at this time (PKT).',
+              'The AI analyst runs once daily at this time (PKT) to investigate your data '
+              'and produce a diagnosis with recommendations.',
               style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
             ),
             const SizedBox(height: 16),
@@ -349,6 +404,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const Spacer(),
                     const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 20),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 28),
+
+            // ── AI Analyst controls ────────────────────────────────────────
+            const Text(
+              'AI ANALYST',
+              style: TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Re-run the AI analyst on demand. It investigates your latest data and produces '
+              'a fresh diagnosis with evidence and recommendations.',
+              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, height: 1.5),
+            ),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: _isRegeneratingAgent ? null : _regenerateAgent,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF334155)),
+                ),
+                child: Row(
+                  children: [
+                    _isRegeneratingAgent
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Color(0xFF3B82F6),
+                            ),
+                          )
+                        : const Icon(
+                            Icons.psychology_outlined,
+                            color: Color(0xFF3B82F6),
+                            size: 20,
+                          ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _isRegeneratingAgent
+                            ? 'Triggering…'
+                            : 'Re-run AI Analysis',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    if (!_isRegeneratingAgent)
+                      const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 20),
                   ],
                 ),
               ),

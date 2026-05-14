@@ -1,25 +1,26 @@
 'use strict';
 
-const { TREND_DAILY_STATS_WINDOW, RECS_RECENT_REPORTS } = require('../config');
-const { getPktNow, getPktMidnightAsUtc, aggregateTodayStats, backfillMissedDays } = require('./daily_stats_service');
-const { generateTrendFromDailyStats } = require('./trend_service');
-const { generateRecommendations } = require('./recommendation_service');
+const { getPktNow, getPktDateString, aggregateTodayStats, backfillMissedDays } = require('./daily_stats_service');
+const { runAndSaveAgentAnalysis } = require('./agent_service');
 
 // Main daily analysis orchestrator.
-// Aggregates today's detections, generates trend and recommendations.
-// Idempotent: skips if trend already generated during today's PKT day.
+// 1. Aggregate today's detections into daily_stats (deterministic chart data).
+// 2. Backfill any orphaned past days.
+// 3. Run the agent — autonomously diagnoses + recommends from the data.
+// Idempotent: skips agent run if today's agent_analyses doc already exists.
 async function runDailyAnalysis(userId, db) {
   console.log(`[DAILY_ANALYSIS] Starting — userId: ${userId}`);
 
-  // Guard: if a trend was already generated during today's PKT day, skip.
-  // Prevents duplicates when multiple requests slip through shouldRunAnalysis concurrently.
-  const todayPktMidnight = getPktMidnightAsUtc(getPktNow());
-  const existingTrend = await db.collection('trends').findOne({
+  const todayPkt = getPktDateString(getPktNow());
+
+  // Guard: if today's agent analysis already exists, skip.
+  // Prevents duplicate Gemini calls when multiple triggers fire concurrently.
+  const existingAgent = await db.collection('agent_analyses').findOne({
     userId,
-    generatedAt: { $gte: todayPktMidnight },
+    pktDate: todayPkt,
   });
-  if (existingTrend) {
-    console.log(`[DAILY_ANALYSIS] Trend already generated today — skipping. userId: ${userId}`);
+  if (existingAgent) {
+    console.log(`[DAILY_ANALYSIS] Agent analysis already exists for today — skipping. userId: ${userId}`);
     return null;
   }
 
@@ -27,49 +28,26 @@ async function runDailyAnalysis(userId, db) {
   //     daily_stats — recovers data when analysis never ran on a previous day.
   await backfillMissedDays(userId, db, 7);
 
-  // 1b. Aggregate today's reports into daily_stats (may be null if 0 today —
-  //     that's OK: backfilled past days still let us generate a trend)
+  // 1b. Aggregate today's reports into daily_stats. May be null if 0 today —
+  //     agent can still investigate backfilled history.
   const todayStats = await aggregateTodayStats(userId, db);
 
-  // 2. Fetch daily_stats sorted oldest→newest for trend computation
-  const dailyStats = await db
-    .collection('daily_stats')
-    .find({ userId })
-    .sort({ date: 1 })
-    .limit(TREND_DAILY_STATS_WINDOW)
-    .toArray();
-
-  if (dailyStats.length < 1) {
-    console.log(`[DAILY_ANALYSIS] No daily_stats found (today or backfill) — skipping. userId: ${userId}`);
-    return null;
-  }
-
-  // 3. Generate trend from daily averages
-  let trend = null;
+  // 2. Run the agent. It autonomously decides which tools to call and produces
+  //    a structured diagnosis with evidence + recommendations.
+  let agentAnalysis = null;
   try {
-    trend = await generateTrendFromDailyStats(userId, dailyStats, db);
+    agentAnalysis = await runAndSaveAgentAnalysis(userId, db);
   } catch (err) {
-    console.error(`[DAILY_ANALYSIS] Trend generation failed — userId: ${userId}: ${err.message}`);
+    console.error(`[DAILY_ANALYSIS] Agent failed — userId: ${userId}: ${err.message}`);
   }
 
-  // 4. Generate recommendations using recent individual reports as context
-  //    (recommendation_service expects individual report documents for its prompt)
-  if (trend) {
-    try {
-      const recentReports = await db
-        .collection('reports')
-        .find({ userId })
-        .sort({ createdAt: -1 })
-        .limit(RECS_RECENT_REPORTS)
-        .toArray();
-      await generateRecommendations(userId, trend, recentReports, db);
-    } catch (err) {
-      console.error(`[DAILY_ANALYSIS] Recommendations failed — userId: ${userId}: ${err.message}`);
-    }
-  }
+  console.log(
+    `[DAILY_ANALYSIS] Complete — userId: ${userId}, ` +
+    `today detections: ${todayStats?.detectionCount ?? 0}, ` +
+    `agent severity: ${agentAnalysis?.severity ?? 'n/a'}`,
+  );
 
-  console.log(`[DAILY_ANALYSIS] Complete — userId: ${userId}, today detections: ${todayStats?.detectionCount ?? 0}, dailyStats: ${dailyStats.length}`);
-  return todayStats ?? dailyStats[dailyStats.length - 1];
+  return agentAnalysis;
 }
 
 module.exports = { runDailyAnalysis };

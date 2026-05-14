@@ -9,6 +9,7 @@ import 'providers/auth_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/home_dashboard.dart';
 import 'screens/login_screen.dart';
+import 'services/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +34,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Poultech',
+      navigatorKey: NotificationService.navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
@@ -55,6 +57,8 @@ class AuthGate extends StatelessWidget {
           return const SplashScreen();
         }
         if (snapshot.hasData && snapshot.data != null) {
+          // Idempotent — safe to call on every rebuild
+          NotificationService.instance.initialize();
           return const HomeDashboard();
         }
         return const LoginScreen();

@@ -1,5 +1,7 @@
 'use strict';
 
+const { sendNotification } = require('./notification_service');
+
 const GEMINI_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
@@ -71,7 +73,7 @@ function fmtDate(d) {
 
 // Generates and saves a weekly summary for the given date range.
 // Returns null (no DB write) when the period has zero reports.
-async function generateWeeklySummary(userId, weekStart, weekEnd, db) {
+async function generateWeeklySummary(userId, weekStart, weekEnd, db, { silent = false } = {}) {
   const reports = await db
     .collection('reports')
     .find({ userId, createdAt: { $gte: weekStart, $lte: weekEnd } })
@@ -207,6 +209,23 @@ async function generateWeeklySummary(userId, weekStart, weekEnd, db) {
     `[SUMMARY] Generated — userId: ${userId}, period: ${weekStartFmt}–${weekEndFmt}, ` +
     `reports: ${reportCount}, id: ${result.insertedId}`,
   );
+
+  // Fire-and-forget push notification. Tap routes to home dashboard where the
+  // weekly summary banner is shown.
+  if (!silent) {
+    const bestPart = bestBatchLabel
+      ? ` Best batch: ${bestBatchLabel} at ${highPct}%.`
+      : '';
+    sendNotification(userId, db, {
+      title: `Weekly summary: ${weekStartFmt}–${weekEndFmt}`,
+      body: `Avg fertility ${avgPct}% across ${reportCount} detection${reportCount === 1 ? '' : 's'}.${bestPart}`,
+      data: {
+        type: 'summary',
+        screen: 'home',
+      },
+    }).catch((err) => console.error(`[SUMMARY] Notification dispatch failed: ${err.message}`));
+  }
+
   return { ...doc, _id: result.insertedId };
 }
 

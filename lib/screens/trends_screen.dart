@@ -2,9 +2,10 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/agent_analysis_model.dart';
 import '../models/daily_stat_model.dart';
 import '../models/today_live_model.dart';
-import '../models/trend_model.dart';
+import '../services/agent_analysis_service.dart';
 import '../services/trend_service.dart';
 
 class TrendsScreen extends StatefulWidget {
@@ -16,12 +17,12 @@ class TrendsScreen extends StatefulWidget {
 
 class _TrendsScreenState extends State<TrendsScreen> {
   final TrendService _trendService = TrendService();
+  final AgentAnalysisService _agentService = AgentAnalysisService();
 
   int _windowDays = 14;
-  TrendModel? _latestTrend;
   List<DailyStatModel> _dailyStats = [];
   TodayLiveModel? _todayLive;
-  List<TrendModel> _trendHistory = [];
+  AgentAnalysisModel? _latestAgent;
   bool _isLoading = true;
 
   @override
@@ -42,18 +43,16 @@ class _TrendsScreenState extends State<TrendsScreen> {
     setState(() => _isLoading = true);
 
     final results = await Future.wait([
-      _trendService.getLatestTrend(windowDays: _windowDays),
       _trendService.getDailyStats(days: _windowDays),
       _trendService.getTodayLive(),
-      _trendService.getTrendHistory(),
+      _agentService.getLatest(),
     ]);
 
     if (mounted) {
       setState(() {
-        _latestTrend = results[0] as TrendModel?;
-        _dailyStats = results[1] as List<DailyStatModel>;
-        _todayLive = results[2] as TodayLiveModel?;
-        _trendHistory = results[3] as List<TrendModel>;
+        _dailyStats = results[0] as List<DailyStatModel>;
+        _todayLive = results[1] as TodayLiveModel?;
+        _latestAgent = results[2] as AgentAnalysisModel?;
         _isLoading = false;
       });
     }
@@ -66,21 +65,17 @@ class _TrendsScreenState extends State<TrendsScreen> {
     await _loadData();
   }
 
-  // Today's date in PKT (UTC+5) as "YYYY-MM-DD"
   String get _todayPktDate {
     final nowPkt = DateTime.now().toUtc().add(const Duration(hours: 5));
     return '${nowPkt.year}-${nowPkt.month.toString().padLeft(2, '0')}-${nowPkt.day.toString().padLeft(2, '0')}';
   }
 
-  // True if today's official daily_stats doc is already in the list
   bool get _isTodayInDailyStats =>
       _dailyStats.isNotEmpty && _dailyStats.last.date == _todayPktDate;
 
-  // Show live dot only when today has detections but analysis hasn't run yet
   bool get _shouldShowLiveDot =>
       (_todayLive?.hasData ?? false) && !_isTodayInDailyStats;
 
-  // All chart spots: one per daily_stat + optional live today dot
   List<FlSpot> get _chartSpots {
     final spots = <FlSpot>[];
     for (var i = 0; i < _dailyStats.length; i++) {
@@ -94,6 +89,23 @@ class _TrendsScreenState extends State<TrendsScreen> {
     return FlSpot(
       _dailyStats.length.toDouble(),
       _todayLive!.averageFertilityRate * 100,
+    );
+  }
+
+  // Accent color — agent severity if known, else neutral blue
+  Color get _accentColor => _latestAgent?.severity.color ?? const Color(0xFF3B82F6);
+
+  // Derived stats from daily_stats — no longer reads from the legacy trends collection
+  ({double avg, double high, double low, int totalDetections})? get _summary {
+    if (_dailyStats.isEmpty) return null;
+    final rates = _dailyStats.map((d) => d.averageFertilityRate).toList();
+    final highs = _dailyStats.map((d) => d.highestRate).toList();
+    final lows = _dailyStats.map((d) => d.lowestRate).toList();
+    return (
+      avg: rates.reduce((a, b) => a + b) / rates.length,
+      high: highs.reduce((a, b) => a > b ? a : b),
+      low: lows.reduce((a, b) => a < b ? a : b),
+      totalDetections: _dailyStats.fold(0, (s, d) => s + d.detectionCount),
     );
   }
 
@@ -134,16 +146,12 @@ class _TrendsScreenState extends State<TrendsScreen> {
                     ],
                     _buildChart(),
                     const SizedBox(height: 20),
-                    _buildHistorySection(),
-                    const SizedBox(height: 20),
                   ],
                 ),
               ),
             ),
     );
   }
-
-  // ── Window selector ────────────────────────────────────────────────────────
 
   Widget _buildWindowSelector() {
     return Container(
@@ -187,10 +195,11 @@ class _TrendsScreenState extends State<TrendsScreen> {
     );
   }
 
-  // ── Summary card ───────────────────────────────────────────────────────────
-
   Widget _buildSummaryCard() {
-    if (_latestTrend == null || _dailyStats.isEmpty) {
+    final s = _summary;
+    final agent = _latestAgent;
+
+    if (s == null) {
       return _card(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,7 +209,7 @@ class _TrendsScreenState extends State<TrendsScreen> {
                 Icon(Icons.show_chart, color: Color(0xFF64748B), size: 20),
                 SizedBox(width: 8),
                 Text(
-                  'No Trend Data Yet',
+                  'No Daily Data Yet',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,
@@ -211,9 +220,9 @@ class _TrendsScreenState extends State<TrendsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              _dailyStats.isEmpty
-                  ? 'Trend analysis generates once daily at your scheduled analysis time. Run detections today to get started.'
-                  : 'Run detections on at least 2 separate days to see trend direction.',
+              _todayLive?.hasData ?? false
+                  ? 'Today\'s detections are showing as a live dot below. The daily aggregate appears tomorrow.'
+                  : 'Run detections to populate the chart. Daily averages aggregate at your analysis time.',
               style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14, height: 1.5),
             ),
           ],
@@ -221,8 +230,8 @@ class _TrendsScreenState extends State<TrendsScreen> {
       );
     }
 
-    final t = _latestTrend!;
-    final color = t.trendColor;
+    final color = _accentColor;
+    final avgPct = '${(s.avg * 100).toStringAsFixed(1)}%';
 
     return Stack(
       children: [
@@ -241,10 +250,16 @@ class _TrendsScreenState extends State<TrendsScreen> {
                 children: [
                   Row(
                     children: [
-                      Icon(t.trendIcon, color: color, size: 20),
+                      Icon(
+                        agent?.severity.icon ?? Icons.show_chart,
+                        color: color,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Text(
-                        t.trendLabel,
+                        agent != null
+                            ? agent.severity.label.toUpperCase()
+                            : '${_dailyStats.length}-DAY AVERAGE',
                         style: TextStyle(
                           color: color,
                           fontSize: 16,
@@ -261,7 +276,7 @@ class _TrendsScreenState extends State<TrendsScreen> {
                       border: Border.all(color: color.withValues(alpha: 0.3)),
                     ),
                     child: Text(
-                      'Avg ${t.averagePercent}',
+                      'Avg $avgPct',
                       style: TextStyle(
                         color: color,
                         fontSize: 13,
@@ -271,35 +286,35 @@ class _TrendsScreenState extends State<TrendsScreen> {
                   ),
                 ],
               ),
-              if (!t.hasInsufficientData) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _statChip('High',
+                      '${(s.high * 100).toStringAsFixed(0)}%',
+                      const Color(0xFF22C55E)),
+                  const SizedBox(width: 8),
+                  _statChip('Low',
+                      '${(s.low * 100).toStringAsFixed(0)}%',
+                      const Color(0xFFEF4444)),
+                  const SizedBox(width: 8),
+                  _statChip('Days', '${_dailyStats.length}',
+                      const Color(0xFF3B82F6)),
+                ],
+              ),
+              if (agent != null && agent.trendNarrative.trim().isNotEmpty) ...[
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    _statChip('High',
-                        '${(t.highestRate * 100).toStringAsFixed(0)}%',
-                        const Color(0xFF22C55E)),
-                    const SizedBox(width: 8),
-                    _statChip('Low',
-                        '${(t.lowestRate * 100).toStringAsFixed(0)}%',
-                        const Color(0xFFEF4444)),
-                    const SizedBox(width: 8),
-                    _statChip('Days', '${t.windowDays}',
-                        const Color(0xFF3B82F6)),
-                  ],
+                Text(
+                  agent.trendNarrative,
+                  style: const TextStyle(
+                    color: Color(0xFF94A3B8),
+                    fontSize: 14,
+                    height: 1.5,
+                  ),
                 ),
               ],
-              const SizedBox(height: 12),
-              Text(
-                t.agentSummary,
-                style: const TextStyle(
-                  color: Color(0xFF94A3B8),
-                  fontSize: 14,
-                  height: 1.5,
-                ),
-              ),
               const SizedBox(height: 4),
               Text(
-                'Based on ${t.reportCount} total detections across ${t.windowDays} days',
+                'Based on ${s.totalDetections} total detection${s.totalDetections == 1 ? '' : 's'} across ${_dailyStats.length} day${_dailyStats.length == 1 ? '' : 's'}',
                 style: const TextStyle(color: Color(0xFF475569), fontSize: 11),
               ),
             ],
@@ -347,8 +362,6 @@ class _TrendsScreenState extends State<TrendsScreen> {
       ),
     );
   }
-
-  // ── Today Live card ────────────────────────────────────────────────────────
 
   Widget _buildTodayLiveCard() {
     final live = _todayLive!;
@@ -401,12 +414,10 @@ class _TrendsScreenState extends State<TrendsScreen> {
     );
   }
 
-  // ── Line chart ─────────────────────────────────────────────────────────────
-
   Widget _buildChart() {
     final historicalSpots = _chartSpots;
     final live = _liveSpot;
-    final trendColor = _latestTrend?.trendColor ?? const Color(0xFF3B82F6);
+    final color = _accentColor;
     final totalPoints = historicalSpots.length + (live != null ? 1 : 0);
 
     return Container(
@@ -460,29 +471,27 @@ class _TrendsScreenState extends State<TrendsScreen> {
                   minY: 0,
                   maxY: 100,
                   lineBarsData: [
-                    // Historical solid line
                     if (historicalSpots.isNotEmpty)
                       LineChartBarData(
                         spots: historicalSpots,
                         isCurved: historicalSpots.length > 2,
-                        color: trendColor,
+                        color: color,
                         barWidth: 2.5,
                         dotData: FlDotData(
                           show: true,
                           getDotPainter: (spot, percent, bar, index) =>
                               FlDotCirclePainter(
                             radius: 4,
-                            color: trendColor,
+                            color: color,
                             strokeWidth: 2,
                             strokeColor: const Color(0xFF1E293B),
                           ),
                         ),
                         belowBarData: BarAreaData(
                           show: true,
-                          color: trendColor.withValues(alpha: 0.08),
+                          color: color.withValues(alpha: 0.08),
                         ),
                       ),
-                    // Live dot — hollow, no connecting line
                     if (live != null)
                       LineChartBarData(
                         spots: [live],
@@ -520,18 +529,13 @@ class _TrendsScreenState extends State<TrendsScreen> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 22,
-                        interval: 1, // force ticks at integer positions only
+                        interval: 1,
                         getTitlesWidget: (value, meta) {
-                          // Reject ticks that aren't on an integer index — fl_chart
-                          // can still emit fractional ticks at the boundaries, and
-                          // value.round() would collapse two of them to the same
-                          // index, duplicating the label (e.g. "May 9, May 9").
                           if ((value - value.roundToDouble()).abs() > 0.01) {
                             return const SizedBox.shrink();
                           }
                           final idx = value.round();
                           if (idx < 0 || idx >= _dailyStats.length) return const SizedBox.shrink();
-                          // Show label only for first, middle, last
                           final showAt = {0, _dailyStats.length ~/ 2, _dailyStats.length - 1};
                           if (!showAt.contains(idx)) return const SizedBox.shrink();
                           return Text(
@@ -566,7 +570,7 @@ class _TrendsScreenState extends State<TrendsScreen> {
                     width: 10,
                     height: 10,
                     decoration: BoxDecoration(
-                      color: trendColor,
+                      color: color,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -600,86 +604,6 @@ class _TrendsScreenState extends State<TrendsScreen> {
     );
   }
 
-  // ── Trend history ──────────────────────────────────────────────────────────
-
-  Widget _buildHistorySection() {
-    if (_trendHistory.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'TREND HISTORY',
-          style: TextStyle(
-            color: Color(0xFF64748B),
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.8,
-          ),
-        ),
-        const SizedBox(height: 10),
-        ..._trendHistory.take(10).map(_buildHistoryItem),
-      ],
-    );
-  }
-
-  Widget _buildHistoryItem(TrendModel t) {
-    final color = t.trendColor;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF334155)),
-      ),
-      child: Row(
-        children: [
-          Icon(t.trendIcon, color: color, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  t.trendLabel,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  '${t.windowDays} days · ${t.reportCount} total detections',
-                  style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
-                ),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                t.averagePercent,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                _fmtDate(t.generatedAt),
-                style: const TextStyle(color: Color(0xFF64748B), fontSize: 10),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
-
   Widget _card({required Widget child}) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -690,13 +614,5 @@ class _TrendsScreenState extends State<TrendsScreen> {
       ),
       child: child,
     );
-  }
-
-  String _fmtDate(DateTime dt) {
-    const m = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    return '${m[dt.month - 1]} ${dt.day}';
   }
 }

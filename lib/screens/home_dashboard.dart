@@ -1,19 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/agent_analysis_model.dart';
 import '../models/batch_model.dart';
-import '../models/recommendation_model.dart';
 import '../models/summary_model.dart';
-import '../models/trend_model.dart';
 import '../providers/auth_provider.dart';
+import '../services/agent_analysis_service.dart';
 import '../services/batch_service.dart';
-import '../services/recommendation_service.dart';
 import '../services/summary_service.dart';
-import '../services/trend_service.dart';
+import 'agent_analysis_screen.dart';
 import 'batch_screen.dart';
 import 'knowledge_assistant.dart';
-import 'recommendations_screen.dart';
 import 'report_history.dart';
 import 'settings_screen.dart';
 import 'trends_screen.dart';
@@ -32,18 +29,15 @@ class _HomeDashboardState extends State<HomeDashboard>
     with SingleTickerProviderStateMixin {
   // Services
   final BatchService _batchService = BatchService();
-  final TrendService _trendService = TrendService();
-  final RecommendationService _recommendationService = RecommendationService();
+  final AgentAnalysisService _agentService = AgentAnalysisService();
   final SummaryService _summaryService = SummaryService();
 
   // Data state
   bool _isLoading = true;
   BatchModel? _activeBatch;
-  TrendModel? _latestTrend;
-  RecommendationsModel? _latestRecommendations;
+  AgentAnalysisModel? _latestAgentAnalysis;
   SummaryModel? _latestSummary;
   bool _summaryDismissed = false;
-  int _trendWindowDays = 14;
 
   // Skeleton pulse animation
   late AnimationController _pulseController;
@@ -62,8 +56,9 @@ class _HomeDashboardState extends State<HomeDashboard>
     _loadAll();
     // Non-blocking: generates weekly summary if today is the configured day
     SummaryService().checkAndGenerateWeeklySummary().catchError((_) {});
-    // Non-blocking: triggers daily analysis if past scheduled time and not yet run today
-    TrendService().triggerDailyAnalysis().catchError((_) {});
+    // Non-blocking: triggers the AI analyst if today's analysis isn't cached yet.
+    // Backend runs in background (~10–15s); next dashboard reload picks it up.
+    AgentAnalysisService().triggerAnalysis().catchError((_) => false);
   }
 
   @override
@@ -75,26 +70,20 @@ class _HomeDashboardState extends State<HomeDashboard>
   // ── Data loading ───────────────────────────────────────────────────────────
 
   Future<void> _loadAll() async {
-    final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() {
-      _trendWindowDays = prefs.getInt('trend_window_days') ?? 14;
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     final results = await Future.wait([
       _safe(() => _batchService.getActiveBatch()),
-      _safe(() => _trendService.getLatestTrend(windowDays: _trendWindowDays)),
-      _safe(() => _recommendationService.getLatestRecommendations()),
+      _safe(() => _agentService.getLatest()),
       _safe(() => _summaryService.getLatestSummary()),
     ]);
 
     if (mounted) {
       setState(() {
         _activeBatch = results[0] as BatchModel?;
-        _latestTrend = results[1] as TrendModel?;
-        _latestRecommendations = results[2] as RecommendationsModel?;
-        _latestSummary = results[3] as SummaryModel?;
+        _latestAgentAnalysis = results[1] as AgentAnalysisModel?;
+        _latestSummary = results[2] as SummaryModel?;
         _isLoading = false;
       });
     }
@@ -140,10 +129,7 @@ class _HomeDashboardState extends State<HomeDashboard>
 
   // ── Computed state ─────────────────────────────────────────────────────────
 
-  bool get _isNewUser =>
-      (_latestTrend == null || _latestTrend!.hasInsufficientData) &&
-      _latestRecommendations == null &&
-      _latestSummary == null;
+  bool get _isNewUser => _latestAgentAnalysis == null && _latestSummary == null;
 
   _SummaryBadge get _summaryBadge {
     final s = _latestSummary;
@@ -232,11 +218,11 @@ class _HomeDashboardState extends State<HomeDashboard>
           if (_isNewUser)
             _buildGettingStartedCard()
           else ...[
-            _sectionLabel('TRENDS'),
+            _sectionLabel('AI ANALYST'),
             const SizedBox(height: 8),
-            _buildTrendCard(),
-            const SizedBox(height: 16),
-            _buildRecommendationsSection(),
+            _buildAgentDiagnosisCard(),
+            const SizedBox(height: 12),
+            _buildTrendsLink(),
           ],
 
           const SizedBox(height: 8),
@@ -739,16 +725,14 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
   }
 
-  // ── Trend Card ────────────────────────────────────────────────────────────
+  // ── Agent Diagnosis Card ──────────────────────────────────────────────────
 
-  Widget _buildTrendCard() {
-    final trend = _latestTrend;
+  Widget _buildAgentDiagnosisCard() {
+    final analysis = _latestAgentAnalysis;
 
-    // Case 1: No trend at all — user has zero detections (or daily_stats failed).
-    // Show a generic "get started" placeholder that's still tappable.
-    if (trend == null) {
+    if (analysis == null) {
       return GestureDetector(
-        onTap: () => _navigateTo(const TrendsScreen()),
+        onTap: () => _navigateTo(const AgentAnalysisScreen()),
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -758,14 +742,14 @@ class _HomeDashboardState extends State<HomeDashboard>
           ),
           child: const Row(
             children: [
-              Icon(Icons.show_chart, color: Color(0xFF64748B), size: 20),
+              Icon(Icons.psychology_outlined, color: Color(0xFF64748B), size: 20),
               SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Trend Analysis',
+                      'Analysis Pending',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 14,
@@ -774,13 +758,12 @@ class _HomeDashboardState extends State<HomeDashboard>
                     ),
                     SizedBox(height: 2),
                     Text(
-                      'Detect on 2+ separate days to see trend direction. Tap to view today\'s live chart.',
+                      'The AI analyst will run after your scheduled time today.',
                       style: TextStyle(color: Color(0xFF64748B), fontSize: 12, height: 1.4),
                     ),
                   ],
                 ),
               ),
-              SizedBox(width: 8),
               Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 20),
             ],
           ),
@@ -788,86 +771,11 @@ class _HomeDashboardState extends State<HomeDashboard>
       );
     }
 
-    // Case 2: Day-1 baseline — we have ONE day of data. Trend direction is
-    // mathematically impossible (need >=2 points for a slope), but we can
-    // still show today's average + count so the card isn't blank.
-    if (trend.hasInsufficientData) {
-      final accent = const Color(0xFF3B82F6);
-      return GestureDetector(
-        onTap: () => _navigateTo(const TrendsScreen()),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E293B),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: accent.withValues(alpha: 0.35)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(Icons.timeline_outlined, color: accent, size: 18),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'BUILDING TREND · DAY 1 OF 2',
-                      style: TextStyle(
-                        color: accent,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Text(
-                          trend.averagePercent,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'avg · ${trend.reportCount} detection${trend.reportCount == 1 ? '' : 's'}',
-                          style: const TextStyle(
-                            color: Color(0xFF94A3B8),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    const Text(
-                      'Detect again tomorrow to unlock trend direction.',
-                      style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 20),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final t = _latestTrend!;
-    final color = t.trendColor;
+    final color = analysis.severity.color;
+    final recCount = analysis.recommendations.length;
 
     return GestureDetector(
-      onTap: () => _navigateTo(const TrendsScreen()),
+      onTap: () => _navigateTo(const AgentAnalysisScreen()),
       child: Stack(
         children: [
           Container(
@@ -877,79 +785,51 @@ class _HomeDashboardState extends State<HomeDashboard>
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: const Color(0xFF334155)),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.show_chart, color: color, size: 14),
-                          const SizedBox(width: 6),
-                          Text(
-                            '${t.windowDays}-DAY TREND',
-                            style: const TextStyle(
-                              color: Color(0xFF64748B),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                        ],
+                Row(
+                  children: [
+                    Icon(analysis.severity.icon, color: color, size: 14),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${analysis.severity.label.toUpperCase()} · TAP TO VIEW',
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
                       ),
-                      const SizedBox(height: 5),
-                      Row(
-                        children: [
-                          Icon(t.trendIcon, color: color, size: 16),
-                          const SizedBox(width: 6),
-                          Text(
-                            t.trendLabel,
-                            style: TextStyle(
-                              color: color,
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            'Avg ${t.averagePercent}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  analysis.diagnosis,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    height: 1.4,
                   ),
                 ),
-                const SizedBox(width: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color: color.withValues(alpha: 0.25)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'View',
-                        style: TextStyle(
-                          color: color,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Text(
+                      recCount == 0
+                          ? 'No actions recommended'
+                          : '$recCount recommendation${recCount == 1 ? '' : 's'}',
+                      style: const TextStyle(
+                        color: Color(0xFF64748B),
+                        fontSize: 12,
                       ),
-                      const SizedBox(width: 4),
-                      Icon(Icons.arrow_forward, color: color, size: 12),
-                    ],
-                  ),
+                    ),
+                    const Spacer(),
+                    Icon(Icons.chevron_right, color: color, size: 18),
+                  ],
                 ),
               ],
             ),
@@ -970,6 +850,37 @@ class _HomeDashboardState extends State<HomeDashboard>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTrendsLink() {
+    return GestureDetector(
+      onTap: () => _navigateTo(const TrendsScreen()),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF334155)),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.show_chart, color: Color(0xFF3B82F6), size: 18),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'View Fertility Chart',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Icon(Icons.chevron_right, color: Color(0xFF64748B), size: 18),
+          ],
+        ),
       ),
     );
   }
@@ -1117,116 +1028,6 @@ class _HomeDashboardState extends State<HomeDashboard>
                 return regenerated;
               },
       ),
-    );
-  }
-
-  // ── Recommendations Badge Card ─────────────────────────────────────────────
-
-  Widget _buildRecommendationsSection() {
-    final rec = _latestRecommendations;
-    if (rec == null || rec.items.isEmpty) return const SizedBox.shrink();
-
-    final count = rec.items.length;
-    final hasUrgent = rec.items.any((i) => i.isUrgent);
-    final accentColor =
-        hasUrgent ? const Color(0xFFEAB308) : const Color(0xFF3B82F6);
-    final topItem = rec.sortedByPriority.first;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionLabel('RECOMMENDATIONS'),
-        const SizedBox(height: 8),
-        GestureDetector(
-          onTap: () => _navigateTo(const RecommendationsScreen()),
-          child: Stack(
-            children: [
-              Container(
-                padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E293B),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF334155)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(topItem.categoryIcon,
-                                  color: accentColor, size: 14),
-                              const SizedBox(width: 6),
-                              Text(
-                                hasUrgent ? 'URGENT ACTION NEEDED' : 'REVIEW RECOMMENDED',
-                                style: TextStyle(
-                                  color: accentColor,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.8,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            topItem.title,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '$count recommendation${count == 1 ? '' : 's'} · Tap to view all',
-                            style: const TextStyle(
-                              color: Color(0xFF64748B),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: accentColor.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(
-                        Icons.arrow_forward_rounded,
-                        color: accentColor,
-                        size: 18,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Positioned(
-                left: 0,
-                top: 0,
-                bottom: 0,
-                child: Container(
-                  width: 4,
-                  decoration: BoxDecoration(
-                    color: accentColor,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(12),
-                      bottomLeft: Radius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 

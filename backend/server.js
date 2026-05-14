@@ -12,10 +12,10 @@ const { router: reportsRouter, initDb: initReportsDb } = require('./routes/repor
 const { router: chatRouter, initDb: initChatDb } = require('./routes/chat');
 const { router: batchesRouter, initDb: initBatchesDb } = require('./routes/batches');
 const { router: trendsRouter, initDb: initTrendsDb } = require('./routes/trends');
-const { router: recommendationsRouter, initDb: initRecommendationsDb } = require('./routes/recommendations');
 const { router: summariesRouter, initDb: initSummariesDb } = require('./routes/summaries');
 const { router: userSettingsRouter, initDb: initUserSettingsDb } = require('./routes/user-settings');
 const { router: dailyStatsRouter, initDb: initDailyStatsDb } = require('./routes/daily-stats');
+const { router: agentRouter, initDb: initAgentDb } = require('./routes/agent');
 const { getPktNow, getPktHours, getPktMinutes } = require('./services/daily_stats_service');
 const { runDailyAnalysis } = require('./services/daily_analysis_service');
 
@@ -35,10 +35,10 @@ app.use('/reports', verifyToken, reportsRouter);
 app.use('/chat', verifyToken, chatRouter);
 app.use('/batches', verifyToken, batchesRouter);
 app.use('/trends', verifyToken, trendsRouter);
-app.use('/recommendations', verifyToken, recommendationsRouter);
 app.use('/summaries', verifyToken, summariesRouter);
 app.use('/user-settings', verifyToken, userSettingsRouter);
 app.use('/daily-stats', verifyToken, dailyStatsRouter);
+app.use('/agent', verifyToken, agentRouter);
 
 // Global error handler (logs + returns 500)
 app.use(errorLogger);
@@ -66,21 +66,22 @@ async function start() {
   await db.collection('chat_sessions').createIndex({ userId: 1, updatedAt: -1 });
   await db.collection('batches').createIndex({ userId: 1, createdAt: -1 });
   await db.collection('batches').createIndex({ userId: 1, status: 1 });
-  await db.collection('trends').createIndex({ userId: 1, generatedAt: -1 });
-  await db.collection('trends').createIndex({ userId: 1, windowDays: 1, generatedAt: -1 });
-  await db.collection('recommendations').createIndex({ userId: 1, generatedAt: -1 });
+  // Legacy 'trends' and 'recommendations' collections are no longer written —
+  // the agent_analyses collection holds the new diagnosis + recs together.
   await db.collection('summaries').createIndex({ userId: 1, weekStart: -1 });
   await db.collection('daily_stats').createIndex({ userId: 1, date: -1 });
+  await db.collection('agent_analyses').createIndex({ userId: 1, pktDate: -1 });
+  await db.collection('agent_analyses').createIndex({ userId: 1, generatedAt: -1 });
 
   // Inject DB into route handlers
   initReportsDb(db);
   initChatDb(db);
   initBatchesDb(db);
   initTrendsDb(db);
-  initRecommendationsDb(db);
   initSummariesDb(db);
   initUserSettingsDb(db);
   initDailyStatsDb(db);
+  initAgentDb(db);
 
   console.log(JSON.stringify({
     timestamp: new Date().toISOString(),

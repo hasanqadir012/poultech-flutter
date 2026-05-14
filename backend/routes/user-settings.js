@@ -53,4 +53,28 @@ router.post('/', async (req, res) => {
   }
 });
 
+// POST /user-settings/fcm-token — store the device's FCM token so the backend
+// can deliver push notifications. Called by Flutter NotificationService on
+// initialize() and on token refresh.
+router.post('/fcm-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (typeof token !== 'string' || token.length === 0) {
+      return res.status(400).json({ error: 'token (string) is required.' });
+    }
+
+    await db.collection('user_settings').updateOne(
+      { _id: req.userId },
+      { $set: { fcmToken: token, fcmTokenUpdatedAt: new Date() } },
+      { upsert: true },
+    );
+
+    console.log(`[USER_SETTINGS] FCM token saved — userId: ${req.userId}, token: ${token.slice(0, 12)}…`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(`[USER_SETTINGS] POST /fcm-token error: ${err.message}`);
+    res.status(500).json({ error: 'Failed to save FCM token.' });
+  }
+});
+
 module.exports = { router, initDb };
